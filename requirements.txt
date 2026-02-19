@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+streamlit
+python-dotenv
+pandas
+numpy
+requests
+yfinance
+alpha_vantage
+fredapi
+textblob
+vaderSentiment
