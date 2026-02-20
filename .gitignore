@@ -25,6 +25,7 @@ wheels/
 # Virtual Environment
 venv/
 ENV/
+.venv/
 
 # Environment Variables
 .env
@@ -32,7 +33,6 @@ ENV/
 .env.development.local
 .env.test.local
 .env.production.local
-.env.local
 
 # IDE
 .vscode/
@@ -41,3 +41,23 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker
+*.dockerignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Vector DB
+chroma_db/

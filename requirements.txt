@@ -1,12 +1,40 @@
+# Web Framework
 fastapi
-uvicorn
-streamlit
+uvicorn[standard]
+
+# Data Validation
+pydantic
+pydantic-settings
+
+# Database
+sqlalchemy
+
+# Environment
 python-dotenv
-pandas
-numpy
-requests
+
+# Data Sources
 yfinance
 alpha_vantage
 fredapi
+
+# Data Processing
+pandas
+numpy
+requests
+
+# NLP / Sentiment (legacy modules)
 textblob
 vaderSentiment
+
+# Frontend
+streamlit
+
+# Testing
+pytest
+pytest-asyncio
+httpx  # required by FastAPI TestClient
+
+# Linting (dev)
+ruff
+black
+isort
