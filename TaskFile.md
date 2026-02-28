@@ -41,66 +41,66 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
     > **Deliverable:** ✔ Stable and test-covered categorization module
 
 ### 🆕 TASK 2.5: Portfolio Database (SQL Layer)
-- [ ] Setup SQLite (Development)
-- [ ] Setup PostgreSQL connection (Production-ready option)
-- [ ] Design database schema:
-    - [ ] `Portfolios` table
-    - [ ] `Holdings` table
-    - [ ] `Transactions` table
-- [ ] Implement ORM layer (SQLAlchemy)
-- [ ] Create CRUD endpoints:
-    - [ ] Create portfolio
-    - [ ] Add holding
-    - [ ] Record transaction
-    - [ ] Fetch portfolio summary
+- [x] Setup SQLite (Development)
+- [x] Setup PostgreSQL connection (Production-ready option)
+- [x] Design database schema:
+    - [x] `Portfolios` table
+    - [x] `Holdings` table
+    - [x] `Transactions` table
+- [x] Implement ORM layer (SQLAlchemy)
+- [x] Create CRUD endpoints:
+    - [x] Create portfolio
+    - [x] Add holding
+    - [x] Record transaction
+    - [x] Fetch portfolio summary
     > **Deliverable:** ✔ Functional portfolio management system
 
 ### TASK 3: Stock Data Service (Hardened)
-- [ ] Integrate yFinance
-- [ ] Wrap API calls with:
-    - [ ] Retry mechanism (tenacity)
-    - [ ] Circuit breaker pattern
-- [ ] Create abstract `DataProvider` interface (allows future AlphaVantage/Polygon swap)
-- [ ] Fetch Data:
-    - [ ] Current price
-    - [ ] Historical OHLC
-    - [ ] Volume
-- [ ] Calculate Indicators:
-    - [ ] RSI
-    - [ ] Moving Averages (SMA/EMA)
-- [ ] Return strictly structured financial data (Pydantic model)
+- [x] Integrate yFinance
+- [x] Wrap API calls with:
+    - [x] Retry mechanism (tenacity)
+    - [x] Circuit breaker pattern
+- [x] Create abstract `DataProvider` interface (allows future AlphaVantage/Polygon swap)
+- [x] Fetch Data:
+    - [x] Current price
+    - [x] Historical OHLC
+    - [x] Volume
+- [x] Calculate Indicators:
+    - [x] RSI
+    - [x] Moving Averages (SMA/EMA)
+- [x] Return strictly structured financial data (Pydantic model)
     > **Deliverable:** ✔ Deterministic, resilient stock data pipeline
 
 ### TASK 4: News Data Service
-- [ ] Integrate News API (or similar provider)
-- [ ] Extract Data:
-    - [ ] Title
-    - [ ] Source
-    - [ ] Published Date
-    - [ ] URL
-- [ ] Normalize response format
-- [ ] Implement caching layer (Redis or in-memory LRU) - *News is semi-static*
-- [ ] Add fallback for API failure
+- [x] Integrate News API (or similar provider)
+- [x] Extract Data:
+    - [x] Title
+    - [x] Source
+    - [x] Published Date
+    - [x] URL
+- [x] Normalize response format
+- [x] Implement caching layer (Redis or in-memory LRU) - *News is semi-static*
+- [x] Add fallback for API failure
     > **Deliverable:** ✔ Cached and normalized news pipeline
 
 ### TASK 5: LLM Analysis Layer
-- [ ] Create Financial Analyst prompt template
-- [ ] Inject structured financial/news data into prompt
-- [ ] Force structured JSON output (Pydantic validation)
-- [ ] Implement output parsing & validation
-- [ ] Control LLM Parameters:
-    - [ ] Temperature (Low for facts)
-    - [ ] Max tokens
-- [ ] Log raw LLM responses for debugging
+- [x] Create Financial Analyst prompt template
+- [x] Inject structured financial/news data into prompt
+- [x] Force structured JSON output (Pydantic validation)
+- [x] Implement output parsing & validation
+- [x] Control LLM Parameters:
+    - [x] Temperature (Low for facts)
+    - [x] Max tokens
+- [x] Log raw LLM responses for debugging
     > **Deliverable:** ✔ Structured, controlled LLM analysis module
 
 ### TASK 6: Guardrails & Validation
-- [ ] Implement JSON schema validation (Verify output matches Pydantic model)
-- [ ] Add retry mechanism for invalid JSON responses
-- [ ] Implement basic hallucination check (Cross-reference numbers if possible)
-- [ ] Implement basic toxicity/safety filter
-- [ ] Add response length limits
-- [ ] Add defensive parsing (Handle malformed JSON)
+- [x] Implement JSON schema validation (Verify output matches Pydantic model)
+- [x] Add retry mechanism for invalid JSON responses
+- [x] Implement basic hallucination check (Cross-reference numbers if possible)
+- [x] Implement basic toxicity/safety filter
+- [x] Add response length limits
+- [x] Add defensive parsing (Handle malformed JSON)
     > **Deliverable:** ✔ Safe and validated LLM output system
 
 ---

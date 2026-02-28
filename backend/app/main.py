@@ -43,7 +43,10 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.api.analyze import router as analyze_router
+from app.api.portfolio import router as portfolio_router
 from app.schemas.analyze import HealthResponse
+from app.core.database import validate_db_connection, engine, Base
+import app.models  # noqa: F401 — ensures all models are registered with Base
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -88,6 +91,9 @@ async def global_exception_handler(
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("🚀 %s starting up", settings.app_name)
+    validate_db_connection()  # Fail fast if DB is unreachable
+    Base.metadata.create_all(bind=engine)  # Auto-create all registered tables
+    logger.info("🗃️ Tables created/verified")
 
 
 @app.on_event("shutdown")
@@ -97,6 +103,7 @@ async def on_shutdown() -> None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(analyze_router)
+app.include_router(portfolio_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

@@ -3,8 +3,17 @@ Application configuration — loaded from .env via python-dotenv.
 Extend this as the project grows (DB URL, LLM keys, etc.)
 """
 
+import os
 from pydantic_settings import BaseSettings
 
+# Calculate the root path (financial_ai/) assuming config.py is inside backend/app/core/
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+# current_file_dir is backend/app/core. Go up 3 levels to reach financial_ai/
+root_dir = os.path.abspath(os.path.join(current_file_dir, "..", "..", ".."))
+env_path = os.path.join(root_dir, ".env")
+# Fallback just in case we are run from old root dynamically
+if not os.path.exists(env_path):
+    env_path = ".env"
 
 class Settings(BaseSettings):
     app_name: str = "Financial Research AI"
@@ -24,9 +33,8 @@ class Settings(BaseSettings):
     news_api_key: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = env_path
         extra = "ignore"
-
 
 settings = Settings()
 

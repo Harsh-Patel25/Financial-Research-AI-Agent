@@ -8,6 +8,7 @@ pydantic-settings
 
 # Database
 sqlalchemy
+psycopg2-binary  # PostgreSQL driver (used when DATABASE_URL=postgresql+psycopg2://...)
 
 # Environment
 python-dotenv
@@ -21,13 +22,22 @@ fredapi
 pandas
 numpy
 requests
+tenacity        # Retry / exponential backoff for external API calls
+feedparser      # RSS feed parsing for News Service
 
 # NLP / Sentiment (legacy modules)
 textblob
 vaderSentiment
 
+# LLM & AI Agents
+langchain
+langchain-core
+langchain-openai
+langchain-google-genai
+
 # Frontend
 streamlit
+plotly
 
 # Testing
 pytest
