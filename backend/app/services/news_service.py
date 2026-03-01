@@ -19,6 +19,7 @@ from typing import Dict, Any
 import feedparser
 from pydantic import ValidationError
 
+from app.core.cache import cache
 from app.schemas.news import NewsArticle, NewsResponse
 
 logger = logging.getLogger(__name__)
@@ -31,38 +32,9 @@ class NewsService:
 
     def __init__(self, provider_name: str = "YahooFinanceRSS"):
         self.provider_name = provider_name
-        self._cache_store: Dict[str, Dict[str, Any]] = {}
-        # Simple dict cache: { "AAPL": {"timestamp": 1234567, "response": NewsResponse} }
 
-    # ── In-Memory Caching (LRU style logic for semi-static data) ──────────────
-
-    def _get_from_cache(self, symbol: str, ttl_minutes: int) -> NewsResponse | None:
-        """Returns cached NewsResponse if it exists and is not expired."""
-        cached_entry = self._cache_store.get(symbol)
-        if not cached_entry:
-            return None
-
-        # Check TTL
-        elapsed = (datetime.now() - cached_entry["timestamp"]).total_seconds()
-        if elapsed < (ttl_minutes * 60):
-            logger.info("News cache HIT | symbol=%s | age=%.1fm", symbol, elapsed / 60)
-            # Return a copy but mark as served from cache
-            response = cached_entry["response"].model_copy(update={"cached": True})
-            return response
-        
-        # Expired
-        logger.debug("News cache EXPIRED | symbol=%s", symbol)
-        del self._cache_store[symbol]
-        return None
-
-    def _save_to_cache(self, symbol: str, response: NewsResponse) -> None:
-        """Stores a fresh NewsResponse into the local cache dict."""
-        # Ensure we don't store 'cached: True' in the base item
-        base_resp = response.model_copy(update={"cached": False})
-        self._cache_store[symbol] = {
-            "timestamp": datetime.now(),
-            "response": base_resp,
-        }
+    def _get_cache_key(self, symbol: str) -> str:
+        return f"news:{symbol.upper()}"
 
     # ── API Integration ───────────────────────────────────────────────────────
 
@@ -86,11 +58,15 @@ class NewsService:
             Never raises exceptions on network failure — returns empty list instead.
         """
         symbol = symbol.upper().strip()
+        cache_key = self._get_cache_key(symbol)
 
         # 1. Check Cache
-        cached = self._get_from_cache(symbol, ttl_minutes=cache_ttl_minutes)
-        if cached:
-            return cached
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            logger.info("News cache HIT | symbol=%s", symbol)
+            # Deserialize dictionary back to Pydantic object
+            cached_response = NewsResponse(**cached_data)
+            return cached_response.model_copy(update={"cached": True})
 
         # 2. Cache Miss -> Fetch
         logger.info("News cache MISS | symbol=%s | fetching from %s", symbol, self.provider_name)
@@ -106,7 +82,8 @@ class NewsService:
         )
 
         # 4. Save to Cache
-        self._save_to_cache(symbol, response)
+        # Convert Pydantic object to dict for serialization
+        cache.set(cache_key, response.model_dump(mode='json'), ttl_seconds=cache_ttl_minutes * 60)
         return response
 
     # ── Provider Specific Logic ───────────────────────────────────────────────

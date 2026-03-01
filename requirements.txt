@@ -13,6 +13,9 @@ psycopg2-binary  # PostgreSQL driver (used when DATABASE_URL=postgresql+psycopg2
 # Environment
 python-dotenv
 
+# Caching
+redis
+
 # Data Sources
 yfinance
 alpha_vantage
@@ -34,6 +37,7 @@ langchain
 langchain-core
 langchain-openai
 langchain-google-genai
+langchain-groq
 
 # Frontend
 streamlit>=1.31.0
@@ -44,6 +48,12 @@ plotly
 pytest
 pytest-asyncio
 httpx  # required by FastAPI TestClient
+
+# Security & API limits
+slowapi
+
+# Observability
+langsmith
 
 # Linting (dev)
 ruff

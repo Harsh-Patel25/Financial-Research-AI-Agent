@@ -1552,3 +1552,101 @@ except json.JSONDecodeError as jde:
 1. A precise error location (`line X column Y`) for logging.
 2. A clean path to re-use the retry loop via a deliberate `ValidationError` re-raise.
 3. Separation between *"invalid JSON structure"* and *"valid JSON but wrong schema"*.
+
+---
+
+# Track B: Advanced Environment (LangGraph & Redis)
+
+## 1. Overview
+
+Implemented a state-driven analysis workflow replacing the static while-loop LLM call, and introduced a robust distributed caching layer to optimize API limits and latency.
+
+Purpose:
+> Elevate the system architecture to support complex graph-based agents (Track B requirement) and defend external vendor APIs (yFinance, News) against rate-limits.
+
+---
+
+## 2. In-Memory / Redis Hybrid Caching (`app/core/cache.py`)
+
+A centralized resilient cache utility was introduced.
+- **Dependency:** Added `redis:7-alpine` to `docker-compose.yml` and the Python `redis` client to `requirements.txt`.
+- **Hybrid Strategy:** The `CacheService` attempts a ping on the `redis_url`. If Redis is offline (e.g., local development without docker), it silently logs a warning and falls back to an internal Python dictionary cache.
+- **Time-to-Live (TTL):**
+    - `get_full_stock_data()` is cached for 120 seconds (2 minutes).
+    - `get_news_for_symbol()` is cached for 900 seconds (15 minutes).
+
+---
+
+## 3. LangGraph Orchestration (`app/ai/analyst.py`)
+
+Migrated `AnalystAgent` from a linear procedural execution to a `langgraph.graph.StateGraph`.
+
+### State Management (`AgentState`)
+Instead of losing data between retries, state is preserved:
+```python
+class AgentState(TypedDict):
+    stock_data: StockDataResponse
+    news_data: Optional[NewsResponse]
+    messages: Annotated[list[BaseMessage], add_messages]
+    parsed_result: Optional[FinancialAnalysisResult]
+    retry_count: int
+```
+
+### Graph Nodes
+1. **`generate_analysis`**: Exclusively handles invoking Gemini/OpenAI and returning the `AIMessage`.
+2. **`validate_and_guard`**: Applies the 4-layer validation pipeline (Pre-parse, Pydantic, Toxicity, Hallucination, Length). If it fails, it appends a correction `HumanMessage` to the state and increments `retry_count`.
+3. **`fallback_analysis`**: Hardcoded safe response if all retries are exhausted.
+
+### Conditional Routing
+An `_edge_should_retry` function inspects `parsed_result` yielding `end`, `retry`, or `fallback` dynamically.
+
+This graph structure ensures extreme reliability while keeping the public `analyze_stock()` interface perfectly identical for the Streamlit frontend.
+
+---
+
+## 4. Real-Time Data Streaming Architecture (WebSockets)
+
+Fulfilled the requirement to add real-time streaming capabilities without breaking the Streamlit synchronous execution model.
+
+1. **FastAPI Backend (`app/api/stream.py`)** 
+   - Created an asynchronous `WebSocket` endpoint mapping to `/api/v1/stream/price/{symbol}`.
+   - Runs an infinite loop fetching `stock_service.get_current_price()` and pushing JSON down the socket every 5 seconds.
+2. **Streamlit Frontend Injection (`frontend/streamlit_app.py`)**
+   - Streamlit naturally struggles with asynchronous real-time event listening because every state change triggers a full top-down Python script re-execution.
+   - To bypass this, we utilize `st.components.v1.html` to inject a raw Vanilla JavaScript payload.
+   - The JS client connects to the WebSocket URL, listens for events, and dynamically mutates the DOM elements mapping to the UI (ignoring the Streamlit Python rerun cycle entirely).
+   - This provides a flawless, flicker-free live ticker experience.
+
+---
+
+## 5. API Rate Limiting & Cost Monitoring (LangSmith & SlowAPI)
+
+Fulfilled the requirement: `Set up monitoring for API rate limits and costs`
+
+1. **Cost & Trajectory Monitoring (LangSmith)**
+   - Because we utilized `langgraph`, LangSmith observability is natively supported without requiring invasive code changes.
+   - We exposed `LANGCHAIN_TRACING_V2` and `LANGCHAIN_API_KEY` through the `.env` template.
+   - Activating this streams token usage, total dollar cost per generation, and step-by-step agent traces to the LangSmith cloud console for complete LLM observability.
+2. **Endpoint Rate Limiting (SlowAPI)**
+   - To defend the application against abuse or misconfigured scripts spamming the backend, we integrated `slowapi` globally across the FastAPI `app` configuration.
+   - We applied a strict `@limiter.limit("5/minute")` to the heavy `/api/v1/analyze` endpoint.
+   - This prevents our LLM or external financial APIs from being exhausted rapidly by malicious or overactive IP addresses.
+
+---
+
+## 6. Continuous Integration (CI/CD)
+
+Fulfilled the requirement: `Create CI/CD pipeline with financial data testing`
+
+To guarantee stable long-term development during Track B:
+1. **GitHub Actions Workflow**
+   - We created `.github/workflows/ci.yml`.
+   - On every `push` and `pull_request` to `main`, a runner spawns a Python 3.11 environment.
+   - It automatically installs all dependencies from `requirements.txt`.
+2. **Quality Gates**
+   - **Formatting & Linting**: It executes `black` (for standard formatting) and `ruff` (for high-speed static analysis).
+   - **Automated Testing**: It executes `pytest backend/tests/ -v`.
+3. **Financial Data Unit Tests**
+   - Added robust tests in `test_financial_data.py` specifically targeting the `StockService` and `NewsService`.
+   - The test suite uses Python `unittest.mock.patch` to simulate and intercept Vendor API responses.
+   - This ensures our data normalization schemas are correct and that error boundaries hold up without actually hitting rate limits on `yfinance` or external RSS feeds during the CI build process.

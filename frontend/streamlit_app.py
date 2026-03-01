@@ -13,6 +13,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 
 # Add the root directory AND the backend directory so imports for 'app.x' resolve natively
@@ -437,11 +438,19 @@ if analyze_btn and symbol_input:
         time.sleep(0.3) # Artificial micro-delay for UX fluidity
         
     try:
-        # Fetching using st.cache_data wrappers
+        # ── Phase 1: Fetch market data (always works, no LLM) ──────────────────
         stock_dict = get_cached_stock(symbol)
         stock_data = StockDataResponse(**stock_dict)
         news_data = get_cached_news(symbol)
-        analysis = get_cached_analysis(symbol, stock_dict, news_data)
+
+        # ── Phase 2: AI Analysis (graceful degradation on quota error) ──────────
+        analysis = None
+        analysis_error = None
+        try:
+            analysis = get_cached_analysis(symbol, stock_dict, news_data)
+        except Exception as ae:
+            import traceback
+            analysis_error = str(ae) + "\\n" + traceback.format_exc()
 
         # Drop the loading screen instantly
         loading_ph.empty()
@@ -464,10 +473,67 @@ if analyze_btn and symbol_input:
             
             st.markdown(f"""
             <div class="mc animated-card" style="animation-delay: 0.1s;">
-                <div class="mc-label">Live Price — {stock_data.symbol}</div>
-                <div class="mc-value">{stock_data.current_price:,.2f}</div>
+                <div class="mc-label">Live Price — {stock_data.symbol} <span id="ws-indicator" style="display:inline-block; width:8px; height:8px; background:#EF4444; border-radius:50%; margin-left:4px;" title="Connecting..."></span></div>
+                <div class="mc-value" id="ws-live-price">{stock_data.current_price:,.2f}</div>
                 <div class="mc-sub {delta_cls}">{delta_sym} {abs(delta_v):.2f} &nbsp;({abs(delta_p):.2f}%)</div>
             </div>""", unsafe_allow_html=True)
+            
+            # ── Inject WebSocket JS Client (Bypassing Streamlit Iframe Isolation) ──
+            ws_code = f"""
+            <script>
+                // Wait for the parent document to be ready
+                setTimeout(function() {{
+                    try {{
+                        const doc = window.parent.document;
+                        const priceEl = doc.getElementById("ws-live-price");
+                        const indEl = doc.getElementById("ws-indicator");
+                        if (!priceEl) return;
+                        
+                        // Use wss:// if hosted, ws:// locally. 
+                        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        // Use localhost:8000 for local dev frontend->backend, or the same host if deployed together
+                        const wsUrl = wsProtocol + '//localhost:8000/api/v1/stream/price/{symbol}';
+                        
+                        const ws = new WebSocket(wsUrl);
+                        
+                        ws.onopen = function() {{
+                            indEl.style.background = '#10B981'; // Green dot = Live
+                            indEl.title = 'Live Stream Connected';
+                        }};
+                        
+                        ws.onmessage = function(event) {{
+                            const data = JSON.parse(event.data);
+                            if (data.price && priceEl) {{
+                                const currentParsed = parseFloat(priceEl.innerText.replace(/,/g, ''));
+                                const newParsed = parseFloat(data.price);
+                                
+                                // Flash effect
+                                if (newParsed > currentParsed) {{
+                                    priceEl.style.color = '#10B981';
+                                }} else if (newParsed < currentParsed) {{
+                                    priceEl.style.color = '#EF4444';
+                                }}
+                                
+                                // Format number and set
+                                priceEl.innerText = newParsed.toLocaleString('en-US', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+                                
+                                // Reset color after 1s
+                                setTimeout(() => {{ priceEl.style.color = '#F1F5F9'; }}, 1000);
+                            }}
+                        }};
+                        
+                        ws.onclose = function() {{
+                            indEl.style.background = '#F59E0B'; // Yellow/Orange = Disconnected
+                            indEl.title = 'Stream Disconnected';
+                        }};
+                    }} catch(e) {{
+                        console.error("Streamlit WebSocket injection failed:", e);
+                    }}
+                }}, 500);
+            </script>
+            """
+            components.html(ws_code, height=0)
+            
             if sparkfig:
                 st.plotly_chart(sparkfig, use_container_width=True, config={'displayModeBar': False})
 
@@ -504,14 +570,14 @@ if analyze_btn and symbol_input:
             </div>""", unsafe_allow_html=True)
 
         with mc5:
+            sentiment_label = analysis.sentiment if analysis else "N/A"
             st.markdown(f"""
             <div class="mc animated-card" style="border-color:rgba(59,130,246,0.3); animation-delay: 0.3s; background: rgba(59,130,246,0.05);">
                 <div class="mc-label" style="color:#93C5FD;">Agent Verdict</div>
-                <div style="margin: 12px 0 4px;"><span class="sbadge {analysis.sentiment}">{analysis.sentiment}</span></div>
+                <div style="margin: 12px 0 4px;"><span class="sbadge {sentiment_label}">{sentiment_label}</span></div>
             </div>""", unsafe_allow_html=True)
 
 
-        # ─────────────────────────────────────────────────────────────────────
         # ROW 2: Day Range + Trading Signal Row
         # ─────────────────────────────────────────────────────────────────────
         low = stock_data.day_low or 0
@@ -616,26 +682,35 @@ if analyze_btn and symbol_input:
         # ─────────────────────────────────────────────────────────────────────
         st.markdown('<div class="glass-card animated-card" style="animation-delay: 0.6s;">', unsafe_allow_html=True)
         st.markdown(f"<h3 style='color:#E2E8F0; margin-bottom:14px;'>🧠 Intelligence Report — <span style='color:#3B82F6;font-family:Roboto Mono,monospace;'>{symbol}</span></h3>", unsafe_allow_html=True)
-        st.markdown(f'<div class="summary-quote">{analysis.summary}</div>', unsafe_allow_html=True)
 
-        kf_col, rf_col = st.columns(2)
-        with kf_col:
-            st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:12px;'>🔑 Key Findings</p>", unsafe_allow_html=True)
-            for f in analysis.key_findings:
-                st.markdown(f"""
-                <div class="finding-item">
-                    <div class="finding-topic">{f.topic}</div>
-                    <div class="finding-detail">{f.detail}</div>
-                </div>""", unsafe_allow_html=True)
+        if analysis:
+            st.markdown(f'<div class="summary-quote">{analysis.summary}</div>', unsafe_allow_html=True)
+            kf_col, rf_col = st.columns(2)
+            with kf_col:
+                st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:12px;'>🔑 Key Findings</p>", unsafe_allow_html=True)
+                for f in analysis.key_findings:
+                    st.markdown(f"""
+                    <div class="finding-item">
+                        <div class="finding-topic">{f.topic}</div>
+                        <div class="finding-detail">{f.detail}</div>
+                    </div>""", unsafe_allow_html=True)
+            with rf_col:
+                st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:12px;'>⚠️ Risk Factors</p>", unsafe_allow_html=True)
+                for r in analysis.risk_factors:
+                    st.markdown(f'<div class="risk-item">{r}</div>', unsafe_allow_html=True)
+                st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-top:20px; margin-bottom:12px;'>📐 Technical Posture</p>", unsafe_allow_html=True)
+                st.markdown(f'<div class="finding-item" style="border-left-color:#818CF8;"><div class="finding-detail">{analysis.technical_posture}</div></div>', unsafe_allow_html=True)
+        else:
+            err_detail = analysis_error or "Unknown error — check terminal logs."
+            st.markdown(f"""
+            <div style="padding:20px; background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.3); border-radius:12px; text-align:center;">
+                <div style="font-size:32px;">⏳</div>
+                <p style="color:#FCD34D; font-weight:600; margin:8px 0;">AI Analysis Temporarily Unavailable</p>
+                <p style="color:#94A3B8; font-size:13px; margin:0; font-family:monospace;">{err_detail}</p>
+                <p style="color:#64748B; font-size:12px; margin-top:8px;">Stock prices, charts, and news above are fully available.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-        with rf_col:
-            st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:12px;'>⚠️ Risk Factors</p>", unsafe_allow_html=True)
-            for r in analysis.risk_factors:
-                st.markdown(f'<div class="risk-item">{r}</div>', unsafe_allow_html=True)
-
-            st.markdown("<p style='color:#94A3B8; font-size:12px; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-top:20px; margin-bottom:12px;'>📐 Technical Posture</p>", unsafe_allow_html=True)
-            st.markdown(f'<div class="finding-item" style="border-left-color:#818CF8;"><div class="finding-detail">{analysis.technical_posture}</div></div>', unsafe_allow_html=True)
-            
         st.markdown('</div>', unsafe_allow_html=True)
 
     except Exception as e:

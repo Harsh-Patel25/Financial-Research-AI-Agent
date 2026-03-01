@@ -29,6 +29,7 @@ from tenacity import (
 )
 
 from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError  # noqa: F401
+from app.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -104,31 +105,40 @@ class StockService:
 
         try:
             ticker = yf.Ticker(symbol)
-            info = ticker.fast_info  # faster than .info — avoids full scrape
-
-            # fast_info raises no error on bad symbol — we detect via None price
-            price: Optional[float] = getattr(info, "last_price", None)
+            
+            price: Optional[float] = None
+            info = None
+            
+            try:
+                info = ticker.fast_info
+                price = getattr(info, "last_price", None)
+            except Exception:
+                # If fast_info throws any KeyError or HTTPError internally, skip to fallback
+                pass
 
             if price is None or price == 0.0:
-                # Attempt fallback via .info (slower but more reliable)
-                full_info = ticker.info
-                price = full_info.get("currentPrice") or full_info.get("regularMarketPrice")
+                try:
+                    full_info = ticker.info
+                    price = full_info.get("currentPrice") or full_info.get("regularMarketPrice")
+                except Exception:
+                    # If full info also throws an exception, price remains None
+                    pass
 
             if not price:
                 raise ValueError(
                     f"No price data found for symbol '{symbol}'. "
-                    "It may be delisted, misspelled, or not supported by yFinance."
+                    "It may be delisted, misspelled, or not supported by yFinance (e.g., use 'TATAMOTORS.NS' instead of 'TATA MOTORS LTD')."
                 )
 
             result = {
                 "symbol": symbol,
                 "price": round(float(price), 4),
-                "currency": getattr(info, "currency", "N/A"),
-                "exchange": getattr(info, "exchange", "N/A"),
-                "market_state": getattr(info, "market_state", "UNKNOWN"),
-                "previous_close": round(float(getattr(info, "previous_close", 0) or 0), 4),
-                "day_high": round(float(getattr(info, "day_high", 0) or 0), 4),
-                "day_low": round(float(getattr(info, "day_low", 0) or 0), 4),
+                "currency": getattr(info, "currency", "N/A") if info else "N/A",
+                "exchange": getattr(info, "exchange", "N/A") if info else "N/A",
+                "market_state": getattr(info, "market_state", "UNKNOWN") if info else "UNKNOWN",
+                "previous_close": round(float(getattr(info, "previous_close", 0) or 0), 4) if info else 0.0,
+                "day_high": round(float(getattr(info, "day_high", 0) or 0), 4) if info else 0.0,
+                "day_low": round(float(getattr(info, "day_low", 0) or 0), 4) if info else 0.0,
             }
             logger.info("Price fetched | symbol=%s | price=%s", symbol, result["price"])
             return result
@@ -220,11 +230,17 @@ class StockService:
                     "volume": int(row.get("Volume", 0)),
                 })
 
+            currency = "N/A"
+            try:
+                currency = getattr(ticker.fast_info, "currency", "N/A")
+            except Exception:
+                pass
+
             result = {
                 "symbol": symbol,
                 "period": period,
                 "interval": interval,
-                "currency": ticker.fast_info.currency if hasattr(ticker, "fast_info") else "N/A",
+                "currency": currency,
                 "num_candles": len(records),
                 "data": records,
             }
@@ -263,7 +279,18 @@ class StockService:
         from app.services.indicators import calculate_all
 
         symbol = symbol.upper().strip()
-        logger.info("get_full_stock_data | symbol=%s", symbol)
+        cache_key = f"stock:{symbol}"
+        
+        # Check Cache
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            logger.info("Stock cache HIT | symbol=%s", symbol)
+            # Need to restore timestamp back to datetime since it was JSON serialized to string
+            if "timestamp" in cached_data and isinstance(cached_data["timestamp"], str):
+                cached_data["timestamp"] = datetime.fromisoformat(cached_data["timestamp"])
+            return cached_data
+
+        logger.info("Stock cache MISS | get_full_stock_data | symbol=%s", symbol)
 
         # Step 1: Live price (raises ValueError / RuntimeError on failure)
         price_data = self.get_current_price(symbol)
@@ -283,7 +310,7 @@ class StockService:
                 "Indicators skipped | symbol=%s | reason=%s", symbol, str(exc)
             )
 
-        return {
+        result = {
             "symbol": price_data["symbol"],
             "current_price": price_data["price"],
             "currency": price_data.get("currency", "N/A"),
@@ -298,6 +325,14 @@ class StockService:
             "ema": indicators["ema"],
             "timestamp": datetime.now(timezone.utc),
         }
+
+        # Save to cache (TTL: 120 seconds / 2 minutes)
+        # Convert datetime to ISO string for JSON serialization
+        cache_payload = result.copy()
+        cache_payload["timestamp"] = cache_payload["timestamp"].isoformat()
+        cache.set(cache_key, cache_payload, ttl_seconds=120)
+
+        return result
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

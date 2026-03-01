@@ -28,9 +28,13 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: str = ""
     gemini_api_key: str = ""
+    groq_api_key: str = ""
 
     # External APIs
     news_api_key: str = ""
+
+    # Caching
+    redis_url: str = "redis://localhost:6379/0"
 
     class Config:
         env_file = env_path

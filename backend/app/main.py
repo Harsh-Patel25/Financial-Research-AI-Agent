@@ -41,9 +41,15 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 from app.core.config import settings
 from app.api.analyze import router as analyze_router
 from app.api.portfolio import router as portfolio_router
+from app.api.stream import router as stream_router
 from app.schemas.analyze import HealthResponse
 from app.core.database import validate_db_connection, engine, Base
 import app.models  # noqa: F401 — ensures all models are registered with Base
@@ -63,6 +69,12 @@ app = FastAPI(
     docs_url="/docs" if settings.debug else None,  # disable Swagger in prod
     redoc_url=None,
 )
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address, default_limits=["20/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # ── Middleware: Global Error Handler ──────────────────────────────────────────
 @app.exception_handler(RequestValidationError)
@@ -104,6 +116,7 @@ async def on_shutdown() -> None:
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(analyze_router)
 app.include_router(portfolio_router)
+app.include_router(stream_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

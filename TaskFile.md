@@ -15,6 +15,7 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
 - [x] Configure Pre-commit hooks (Black, Ruff/Flake8, isort)
 - [x] Setup environment configuration (`.env` + python-dotenv)
 - [x] Define base project folder structure
+- [x] Track A Milestone: Deploy basic version on Streamlit Cloud
     > **Deliverable:** ✔ Clean project scaffold with version control and testing support
 
 ### TASK 1: Backend API Setup (Hardened)
@@ -82,6 +83,14 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
 - [x] Implement caching layer (Redis or in-memory LRU) - *News is semi-static*
 - [x] Add fallback for API failure
     > **Deliverable:** ✔ Cached and normalized news pipeline
+
+### Track B Checklist:
+- [x] All Track A requirements plus:
+- [x] Set up advanced environment (LangGraph, Redis for caching, PostgreSQL)
+- [x] Implement real-time data streaming architecture
+- [x] Add comprehensive error handling for API failures
+- [x] Set up monitoring for API rate limits and costs
+- [x] Create CI/CD pipeline with financial data testing
 
 ### TASK 5: LLM Analysis Layer
 - [x] Create Financial Analyst prompt template

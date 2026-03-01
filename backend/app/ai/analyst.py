@@ -1,29 +1,26 @@
 """
-Financial Analyst Agent (ai/analyst.py)
+Financial Analyst Agent (ai/analyst.py) - LangGraph Edition
 
 Responsible for taking structured market data (Price, Techs) and context (News)
 and feeding it to the LLM (Gemini/OpenAI) with strict instructions to generate
 a deterministic, professional JSON analysis.
 
-Implements Task 5:
-- strict system prompt
-- low temperature
-- validation via Pydantic output parsers
-
-Implements Task 6:
-- JSON validation retry (1 attempt) with correction prompt injection
-- Toxicity / content safety moderation filter on every LLM output
+Now powered by LangGraph to handle stateful, multi-node cyclic workflows:
+[START] -> [Generate] -> [Validate & Guardrails] -> (Retry Loop) -> [END]
 """
 
 import json
 import logging
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, TypedDict, Annotated
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import SystemMessage, HumanMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from pydantic import ValidationError
 
 from app.core.config import settings
@@ -37,28 +34,50 @@ from app.ai.response_limits import run_length_check
 logger = logging.getLogger(__name__)
 
 
+# ── LangGraph State Definition ────────────────────────────────────────────────
+
+class AgentState(TypedDict):
+    """The graph state across nodes."""
+    stock_data: StockDataResponse
+    news_data: Optional[NewsResponse]
+    messages: Annotated[list[BaseMessage], add_messages]
+    parsed_result: Optional[FinancialAnalysisResult]
+    retry_count: int
+
+
+# ── Analyst Agent (LangGraph Wrapper) ─────────────────────────────────────────
+
 class AnalystAgent:
     """
-    Wraps the LLM interaction logic. Disables creativity, enforces strict JSON shapes,
-    and handles formatting context blocks.
+    Wraps the LangGraph setup and exposes a simple analyze_stock() 
+    method to keep the rest of the application unchanged.
     """
 
     def __init__(self):
-        # Prefer Gemini if key exists, else fallback to OpenAI
-        if settings.gemini_api_key:
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                temperature=0.2, # Very low temperature for maximum determinism
-                api_key=settings.gemini_api_key
+        # Priority: Groq (free, fast) → OpenAI → Gemini
+        if settings.groq_api_key:
+            self.llm = ChatGroq(
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+                api_key=settings.groq_api_key
             )
+            logger.info("LLM initialized: Groq / llama-3.3-70b-versatile")
         elif settings.openai_api_key:
             self.llm = ChatOpenAI(
                 model="gpt-4o-mini",
                 temperature=0.2,
                 api_key=settings.openai_api_key
             )
+            logger.info("LLM initialized: OpenAI / gpt-4o-mini")
+        elif settings.gemini_api_key:
+            self.llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-pro",
+                temperature=0.2,
+                api_key=settings.gemini_api_key
+            )
+            logger.info("LLM initialized: Gemini / gemini-2.5-pro")
         else:
-            raise ValueError("No LLM API key configured (gemini_api_key or openai_api_key).")
+            raise ValueError("No LLM API key found. Set GROQ_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY in .env")
 
         self.parser = PydanticOutputParser(pydantic_object=FinancialAnalysisResult)
 
@@ -75,6 +94,129 @@ CRITICAL RULES:
 ## EXPECTED JSON OUTPUT FORMAT
 {format_instructions}
 """
+        # Compile the LangGraph
+        self._graph = self._build_graph()
+
+    def _build_graph(self):
+        """Constructs the iterative StateGraph for the analysis pipeline."""
+        workflow = StateGraph(AgentState)
+
+        workflow.add_node("generate_analysis", self._node_generate_analysis)
+        workflow.add_node("validate_and_guard", self._node_validate_and_guard)
+        workflow.add_node("fallback_analysis", self._node_fallback_analysis)
+
+        workflow.add_edge(START, "generate_analysis")
+        workflow.add_edge("generate_analysis", "validate_and_guard")
+        
+        # Conditional logic based on validation result
+        workflow.add_conditional_edges(
+            "validate_and_guard",
+            self._edge_should_retry,
+            {
+                "end": END,
+                "retry": "generate_analysis",
+                "fallback": "fallback_analysis"
+            }
+        )
+        workflow.add_edge("fallback_analysis", END)
+
+        return workflow.compile()
+
+    # ── Graph Nodes ───────────────────────────────────────────────────────────
+
+    def _node_generate_analysis(self, state: AgentState) -> dict:
+        """Node 1: Calls the LLM with rate-limit retry handling."""
+        attempt = state['retry_count'] + 1
+        logger.info(f"Node [Generate]: Invoking LLM for {state['stock_data'].symbol} (Attempt {attempt})")
+        
+        max_llm_retries = 3
+        for llm_attempt in range(max_llm_retries):
+            try:
+                response = self.llm.invoke(state["messages"])
+                return {"messages": [response]}
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                # Handle rate limit (429 / ResourceExhausted)
+                if any(kw in exc_str for kw in ["429", "resource_exhausted", "quota", "retrydelay"]):
+                    wait_secs = 60
+                    logger.warning(
+                        f"Rate limit hit for {state['stock_data'].symbol}. "
+                        f"Waiting {wait_secs}s before retry {llm_attempt + 1}/{max_llm_retries}..."
+                    )
+                    time.sleep(wait_secs)
+                else:
+                    raise  # Non-rate-limit errors propagate immediately
+        
+        # If all retries exhausted raise the last error
+        raise RuntimeError(f"LLM rate limit exceeded after {max_llm_retries} retries for {state['stock_data'].symbol}.")
+
+    def _node_validate_and_guard(self, state: AgentState) -> dict:
+        """Node 2: Defensive parse, Pydantic validation, Toxicity, Hallucination, & Length limits."""
+        logger.info(f"Node [Validate]: Running validation pipeline for {state['stock_data'].symbol}")
+        
+        # The last message is the AI's response
+        ai_response = state["messages"][-1].content
+        raw_content = ai_response.strip()
+
+        # 1. Strip markdown wrappers
+        if raw_content.startswith("```json"):
+            raw_content = raw_content[7:]
+        if raw_content.endswith("```"):
+            raw_content = raw_content[:-3]
+        raw_content = raw_content.strip()
+
+        try:
+            # 2. Defensive JSON Pre-parse
+            json.loads(raw_content)
+
+            # 3. Pydantic validation
+            result = self.parser.parse(raw_content)
+
+            # 4. Content Guardrails Pipeline (Task 6)
+            result = run_toxicity_check(result)
+            result = run_hallucination_check(result, state["stock_data"])
+            result = run_length_check(result)
+
+            logger.info("Node [Validate]: Success. Moving to END.")
+            return {"parsed_result": result}
+
+        # Catch both json loads error and pydantic parse errors
+        except Exception as ve:
+            logger.warning(f"Node [Validate]: Failed - {ve}")
+            
+            # Format correction prompt to append to the conversation history
+            correction_msg = HumanMessage(
+                content=f"Your previous response failed validation with the following error:\n{ve}\n\n"
+                        f"Please correct your JSON output and ensure it EXACTLY matches the requested schema without markdown blocks."
+            )
+            return {
+                "messages": [correction_msg],
+                "retry_count": state["retry_count"] + 1
+            }
+
+    def _node_fallback_analysis(self, state: AgentState) -> dict:
+        """Node 3: Hardcoded fallback if the retry loop exhausts."""
+        logger.error(f"Node [Fallback]: Max retries exhausted for {state['stock_data'].symbol}.")
+        fallback = FinancialAnalysisResult(
+            summary="Analysis failed due to repetitive validation errors from the AI model.",
+            sentiment="NEUTRAL",
+            key_findings=[],
+            risk_factors=["System encountered an unrecoverable validation error during synthesis."],
+            technical_posture="Data unavailable due to parsing failure."
+        )
+        return {"parsed_result": fallback}
+
+    # ── Graph Edges ───────────────────────────────────────────────────────────
+
+    def _edge_should_retry(self, state: AgentState) -> str:
+        """Determines next node post-validation."""
+        if state.get("parsed_result") is not None:
+            return "end" # Validation passed
+        if state["retry_count"] < 1:  # Max 1 retry
+            return "retry"
+        return "fallback"
+
+    # ── Main Entrypoint (Backward Compatible) ─────────────────────────────────
 
     def analyze_stock(
         self, 
@@ -82,14 +224,15 @@ CRITICAL RULES:
         news_data: Optional[NewsResponse] = None
     ) -> FinancialAnalysisResult:
         """
-        Injects the structured data into the prompt, triggers the LLM, and forces validation.
+        Public API backward compatible with the older static script.
+        Initializes graph state and runs the workflow.
         """
-        logger.info(f"Generating LLM analysis for {stock_data.symbol}")
+        logger.info(f"Initializing LangGraph analysis for {stock_data.symbol}")
 
-        # 1. Format the Data
+        # 1. Format Data Context
         stock_context = json.dumps(stock_data.model_dump(mode="json"), indent=2)
-        
         news_context = "No recent news available."
+        
         if news_data and news_data.count > 0:
             news_dump = [a.model_dump(mode="json") for a in news_data.articles]
             news_context = json.dumps(news_dump, indent=2)
@@ -105,9 +248,7 @@ CRITICAL RULES:
 
 Synthesize this data immediately.
 """
-
-        # 2. Build the Message List
-        messages = [
+        initial_messages = [
             SystemMessage(content=self.system_prompt.replace(
                 "{format_instructions}", 
                 self.parser.get_format_instructions()
@@ -115,79 +256,21 @@ Synthesize this data immediately.
             HumanMessage(content=human_prompt)
         ]
 
-        # 3. Call the LLM with a 1-retry guardrail
-        max_retries = 1
-        for attempt in range(max_retries + 1):
-            try:
-                response = self.llm.invoke(messages)
-                raw_content = response.content
+        # 2. Setup Initial State
+        initial_state: AgentState = {
+            "stock_data": stock_data,
+            "news_data": news_data,
+            "messages": initial_messages,
+            "parsed_result": None,
+            "retry_count": 0
+        }
 
-                # Attempt to strip ```json wrappers if the LLM leaked them despite instructions
-                raw_content = raw_content.strip()
-                if raw_content.startswith("```json"):
-                    raw_content = raw_content[7:]
-                if raw_content.endswith("```"):
-                    raw_content = raw_content[:-3]
-                raw_content = raw_content.strip()
+        # 3. Execute LangGraph
+        config = {"recursion_limit": 10} # Prevent infinite loops
+        final_state = self._graph.invoke(initial_state, config=config)
 
-                # 4. Defensive JSON Pre-parse — catch malformed JSON before Pydantic
-                try:
-                    json.loads(raw_content)  # dry-run parse — raises JSONDecodeError if invalid
-                except json.JSONDecodeError as jde:
-                    logger.warning(
-                        "Attempt %d: Raw LLM response is not valid JSON for %s: %s",
-                        attempt + 1, stock_data.symbol, str(jde)
-                    )
-                    # Treat as a ValidationError — triggers the retry / fallback path
-                    raise ValidationError.from_exception_data(
-                        title="JSONDecodeError",
-                        line_errors=[{
-                            "type": "json_invalid",
-                            "loc": ("raw_content",),
-                            "msg": f"LLM returned non-JSON content: {str(jde)}",
-                            "input": raw_content[:200],
-                            "ctx": {"error": str(jde)},
-                        }],
-                    ) from jde
-
-                # 5. Pydantic Schema Validation
-                result = self.parser.parse(raw_content)
-                logger.info(f"LLM analysis completed successfully for {stock_data.symbol} on attempt {attempt + 1}")
-
-                # --- Task 6: Toxicity / Content Safety Moderation ---
-                result = run_toxicity_check(result)
-
-                # --- Task 6: Hallucination Check (numeric cross-validation) ---
-                result = run_hallucination_check(result, stock_data)
-
-                # --- Task 6: Response Length Limits (trim oversized fields) ---
-                result = run_length_check(result)
-
-                return result
-
-            except ValidationError as ve:
-                logger.warning(f"Attempt {attempt + 1}: LLM returned invalid JSON schema for {stock_data.symbol}: {ve}")
-                if attempt < max_retries:
-                    logger.info(f"Retrying LLM analysis for {stock_data.symbol} with correction instruction...")
-                    # Append the error and ask for a correction
-                    correction_message = HumanMessage(
-                        content=f"Your previous response failed validation with the following error:\n{ve}\n\n"
-                                f"Please correct your JSON output and ensure it EXACTLY matches the requested schema."
-                    )
-                    messages.append(response) # Add the bad response to context
-                    messages.append(correction_message)
-                else:
-                    logger.error(f"Final attempt failed for {stock_data.symbol}. Unable to retrieve valid JSON analysis.")
-                    return FinancialAnalysisResult(
-                        summary="Analysis failed due to repetitive validation errors from the AI model.",
-                        sentiment="NEUTRAL",
-                        key_findings=[],
-                        risk_factors=["System encountered an unrecoverable validation error during synthesis."],
-                        technical_posture="Data unavailable due to parsing failure."
-                    )
-            except Exception as exc:
-                logger.error(f"LLM inference failed for {stock_data.symbol}: {exc}")
-                raise RuntimeError(f"Failed to generate analysis: {exc}") from exc
+        # 4. Return the parsed Pydantic object
+        return final_state["parsed_result"]
 
 
 # Module-level singleton to reuse the Langchain setup

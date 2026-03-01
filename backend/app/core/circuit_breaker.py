@@ -62,11 +62,13 @@ class CircuitBreaker:
         failure_threshold: int = 3,
         recovery_timeout: float = 30.0,
         fallback: Optional[Callable[..., Any]] = None,
+        expected_exceptions: tuple = (ValueError,),
     ) -> None:
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.fallback = fallback
+        self.expected_exceptions = expected_exceptions
 
         self._state = CircuitState.CLOSED
         self._failure_count = 0
@@ -133,6 +135,11 @@ class CircuitBreaker:
             result = func(*args, **kwargs)
             self._on_success()
             return result
+        except self.expected_exceptions:
+            # Expected business errors (e.g., invalid ticker) mean the service is 
+            # actually healthy and responding correctly—do not trip the breaker.
+            self._on_success()
+            raise
         except Exception as exc:
             self._on_failure(exc)
             raise

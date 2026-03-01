@@ -36,14 +36,20 @@ Overall, this module serves as the API interface layer,
 ensuring modularity, strict validation, and production-ready structure.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
 
+# Local limiter instance or pull from request state
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/api/v1", tags=["analyze"])
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(payload: AnalyzeRequest) -> AnalyzeResponse:
+@limiter.limit("5/minute")
+async def analyze(request: Request, payload: AnalyzeRequest) -> AnalyzeResponse:
     """
     Accepts a financial question, categorizes it, fetches relevant data,
     runs LLM analysis, and returns a structured JSON response.

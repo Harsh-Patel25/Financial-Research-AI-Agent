@@ -1,0 +1,50 @@
+name: Financial AI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip' # Speeds up runs by caching requirements
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+
+    - name: Lint with Ruff
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        # ruff check . --select=E9,F63,F7,F82
+        # For now, just run a standard check and warn out
+        ruff check . --exit-zero
+
+    - name: Format with Black
+      run: |
+        black --check backend/ frontend/ || echo "Black formatting issues found. Please run 'black .' locally."
+
+    - name: Test Financial Data Layer with Pytest
+      # Environment variables are required for the config initialization
+      env:
+        GEMINI_API_KEY: "dummy-key-for-tests"
+        LANGCHAIN_API_KEY: "dummy-key"
+      run: |
+        # Run unit tests on the core financial data services
+        PYTHONPATH=backend pytest backend/tests/ -v

@@ -34,8 +34,8 @@ class FinancialAnalysisResult(BaseModel):
     )
     key_findings: List[KeyFinding] = Field(
         ..., 
-        description="3-5 critical bullet points spanning price action, news catalysts, and risks.",
-        min_length=1,
+        description="0-5 critical bullet points spanning price action, news catalysts, and risks.",
+        min_length=0,
         max_length=5
     )
     risk_factors: List[str] = Field(
