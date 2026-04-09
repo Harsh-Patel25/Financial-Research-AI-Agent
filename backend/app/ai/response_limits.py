@@ -17,7 +17,7 @@ Design Philosophy:
 """
 
 import logging
-from app.schemas.analysis import FinancialAnalysisResult, KeyFinding
+from app.schemas.analysis import FinancialAnalysisResult, TechnicalSignal, SentimentSignal
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 LIMITS = {
-    "summary":          600,   # ~4-5 readable sentences max
-    "technical_posture": 300,  # 2-3 sentences
-    "key_finding_topic": 60,   # Short label, not a paragraph
-    "key_finding_detail": 250, # 1-2 sentences per bullet
-    "risk_factor":       200,  # 1 crisp sentence per risk
+    "reasoning_summary":          600,   # ~4-5 readable sentences max
+    "technical_interpretation": 250, # 1-2 sentences per bullet
+    "sentiment_interpretation":   250, # 1-2 sentences per bullet
+    "risk_assessment":       200,  # 1 crisp sentence per risk
 }
 
 _ELLIPSIS = "…"
@@ -74,44 +73,41 @@ def run_length_check(result: FinancialAnalysisResult) -> FinancialAnalysisResult
     """
     changes: dict = {}
 
-    # --- summary ---
-    clean_summary = _truncate(result.summary, LIMITS["summary"], "summary")
-    if clean_summary != result.summary:
-        changes["summary"] = clean_summary
+    # --- reasoning_summary ---
+    clean_summary = _truncate(result.reasoning_summary, LIMITS["reasoning_summary"], "reasoning_summary")
+    if clean_summary != result.reasoning_summary:
+        changes["reasoning_summary"] = clean_summary
 
-    # --- technical_posture ---
-    clean_posture = _truncate(
-        result.technical_posture, LIMITS["technical_posture"], "technical_posture"
-    )
-    if clean_posture != result.technical_posture:
-        changes["technical_posture"] = clean_posture
-
-    # --- key_findings (rebuild list if any field was trimmed) ---
-    clean_findings = []
-    findings_changed = False
-    for i, finding in enumerate(result.key_findings):
-        clean_topic = _truncate(
-            finding.topic, LIMITS["key_finding_topic"], f"key_findings[{i}].topic"
+    # --- technical_signals ---
+    clean_technicals = []
+    techs_changed = False
+    for i, finding in enumerate(result.technical_signals):
+        clean_interp = _truncate(
+            finding.interpretation, LIMITS["technical_interpretation"], f"technical_signals[{i}].interpretation"
         )
-        clean_detail = _truncate(
-            finding.detail, LIMITS["key_finding_detail"], f"key_findings[{i}].detail"
-        )
-        if clean_topic != finding.topic or clean_detail != finding.detail:
-            findings_changed = True
-        clean_findings.append(KeyFinding(topic=clean_topic, detail=clean_detail))
-    if findings_changed:
-        changes["key_findings"] = clean_findings
+        if clean_interp != finding.interpretation:
+            techs_changed = True
+        clean_technicals.append(TechnicalSignal(indicator=finding.indicator, value=finding.value, interpretation=clean_interp))
+    if techs_changed:
+        changes["technical_signals"] = clean_technicals
 
-    # --- risk_factors ---
-    clean_risks = []
-    risks_changed = False
-    for i, risk in enumerate(result.risk_factors):
-        clean_risk = _truncate(risk, LIMITS["risk_factor"], f"risk_factors[{i}]")
-        if clean_risk != risk:
-            risks_changed = True
-        clean_risks.append(clean_risk)
-    if risks_changed:
-        changes["risk_factors"] = clean_risks
+    # --- sentiment_signals ---
+    clean_sentiments = []
+    sent_changed = False
+    for i, finding in enumerate(result.sentiment_signals):
+        clean_interp = _truncate(
+            finding.interpretation, LIMITS["sentiment_interpretation"], f"sentiment_signals[{i}].interpretation"
+        )
+        if clean_interp != finding.interpretation:
+            sent_changed = True
+        clean_sentiments.append(SentimentSignal(source=finding.source, score=finding.score, interpretation=clean_interp))
+    if sent_changed:
+        changes["sentiment_signals"] = clean_sentiments
+        
+    # --- risk_assessment ---
+    clean_risk = _truncate(result.risk_assessment, LIMITS["risk_assessment"], "risk_assessment")
+    if clean_risk != result.risk_assessment:
+        changes["risk_assessment"] = clean_risk
 
     if changes:
         logger.info("Response length enforcement applied %d field change(s).", len(changes))

@@ -19,8 +19,8 @@ from typing import Dict, Any
 import feedparser
 from pydantic import ValidationError
 
-from app.core.cache import cache
-from app.schemas.news import NewsArticle, NewsResponse
+from ..core.cache import cache
+from ..schemas.news import NewsArticle, NewsResponse
 
 logger = logging.getLogger(__name__)
 

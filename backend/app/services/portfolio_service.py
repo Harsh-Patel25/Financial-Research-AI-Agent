@@ -17,9 +17,9 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.portfolio import Portfolio
-from app.models.holding import Holding
-from app.models.transaction import Transaction, TransactionType
+from ..models.portfolio import Portfolio
+from ..models.holding import Holding
+from ..models.transaction import Transaction, TransactionType
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,15 @@ def create_portfolio(db: Session, name: str) -> Portfolio:
     db.flush()  # Flush to get the auto-generated ID before commit
     logger.info("Portfolio created | id=%s | name='%s'", portfolio.id, portfolio.name)
     return portfolio
+
+
+def get_all_portfolios(db: Session) -> list[Portfolio]:
+    """
+    Returns a list of all portfolios.
+    """
+    portfolios = db.query(Portfolio).all()
+    logger.info("Fetched all %d portfolios", len(portfolios))
+    return portfolios
 
 
 def add_holding(

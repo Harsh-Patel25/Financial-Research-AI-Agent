@@ -11,12 +11,13 @@ This router is THIN — no business logic lives here.
 """
 
 import logging
+from typing import List
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db
-from app.schemas.portfolio import (
+from ..core.dependencies import get_db
+from ..schemas.portfolio import (
     CreatePortfolioRequest,
     AddHoldingRequest,
     RecordTransactionRequest,
@@ -25,7 +26,8 @@ from app.schemas.portfolio import (
     TransactionResponse,
     HoldingSummary,
 )
-from app.services import portfolio_service
+from ..services import portfolio_service
+from ..services.mpt_service import optimize_portfolio
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,21 @@ router = APIRouter(prefix="/portfolios", tags=["portfolio"])
 
 
 # ── 1. Create Portfolio ───────────────────────────────────────────────────────
+
+@router.get(
+    "/",
+    response_model=List[PortfolioResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get all portfolios",
+)
+def get_all_portfolios(db: Session = Depends(get_db)) -> List[PortfolioResponse]:
+    """
+    Returns a list of all portfolios.
+    """
+    logger.info("GET /portfolios")
+    portfolios = portfolio_service.get_all_portfolios(db=db)
+    return [_build_portfolio_response(p) for p in portfolios]
+
 
 @router.post(
     "/",
@@ -175,3 +192,24 @@ def get_portfolio_summary(
     logger.info("GET /portfolios/%s/summary", portfolio_id)
     data = portfolio_service.get_portfolio_summary(db=db, portfolio_id=portfolio_id)
     return PortfolioSummaryResponse(**data)
+
+# ── 5. Optimize Portfolio (MPT) ──────────────────────────────────────────────────
+
+@router.get(
+    "/{portfolio_id}/optimize",
+    status_code=200,
+    summary="Optimize portfolio weights using Modern Portfolio Theory",
+)
+def optimize_user_portfolio(
+    portfolio_id: int,
+    db: Session = Depends(get_db),
+):
+    logger.info("GET /portfolios/%s/optimize", portfolio_id)
+    portfolio = portfolio_service._get_portfolio_or_404(db, portfolio_id)
+    
+    symbols = [h.symbol for h in portfolio.holdings if h.quantity > 0]
+    if len(symbols) < 2:
+        return {"status": "error", "message": "At least 2 active holdings required to optimize."}
+        
+    return optimize_portfolio(symbols)
+

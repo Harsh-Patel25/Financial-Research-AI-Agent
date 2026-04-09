@@ -11,7 +11,7 @@ Responsibilities:
 Usage in a route:
     from fastapi import Depends
     from sqlalchemy.orm import Session
-    from app.core.dependencies import get_db
+    from .dependencies import get_db
 
     @router.post("/portfolios")
     def create_portfolio(db: Session = Depends(get_db)):
@@ -35,7 +35,7 @@ from typing import Generator
 
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from .database import SessionLocal
 
 logger = logging.getLogger(__name__)
 

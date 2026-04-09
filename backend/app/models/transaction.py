@@ -15,11 +15,11 @@ from sqlalchemy import Enum as SAEnum, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from app.core.database import Base
+from ..core.database import Base
 
 # TYPE_CHECKING guard — prevents circular import at runtime.
 if TYPE_CHECKING:
-    from app.models.portfolio import Portfolio
+    from .portfolio import Portfolio
 
 
 class TransactionType(str, enum.Enum):
@@ -55,6 +55,7 @@ class Transaction(Base):
     - timestamp: Auto-set by the DB server at insert time.
     """
     __tablename__ = "transactions"
+    __table_args__ = {"extend_existing": True}
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 

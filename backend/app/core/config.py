@@ -10,10 +10,11 @@ from pydantic_settings import BaseSettings
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
 # current_file_dir is backend/app/core. Go up 3 levels to reach financial_ai/
 root_dir = os.path.abspath(os.path.join(current_file_dir, "..", "..", ".."))
+
 env_path = os.path.join(root_dir, ".env")
-# Fallback just in case we are run from old root dynamically
-if not os.path.exists(env_path):
-    env_path = ".env"
+# Path for the database file (always at the root_dir level)
+db_path = os.path.join(root_dir, "financial_ai.db")
+db_url = f"sqlite:///{db_path}"
 
 class Settings(BaseSettings):
     app_name: str = "Financial Research AI"
@@ -21,9 +22,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Database
-    # Dev default: SQLite file stored in project root.
-    # Production override: set DATABASE_URL=postgresql+psycopg2://user:pass@host/db
-    database_url: str = "sqlite:///./financial_ai.db"
+    # Standardized: Absolute path to root_dir/financial_ai.db
+    database_url: str = db_url
 
     # LLM
     openai_api_key: str = ""

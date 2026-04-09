@@ -23,15 +23,47 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from pydantic import ValidationError
 
-from app.core.config import settings
-from app.schemas.analysis import FinancialAnalysisResult
-from app.schemas.stock import StockDataResponse
-from app.schemas.news import NewsResponse
-from app.ai.moderation import run_toxicity_check
-from app.ai.hallucination_check import run_hallucination_check
-from app.ai.response_limits import run_length_check
+from ..core.config import settings
+from ..schemas.analysis import FinancialAnalysisResult
+from ..schemas.stock import StockDataResponse
+from ..schemas.news import NewsResponse
+from .scoring import compute_technical_signals
+from .moderation import run_toxicity_check
+from .hallucination_check import run_hallucination_check
+from .response_limits import run_length_check
 
+# Logger must be defined BEFORE the vader import try/except block
+# so it can be used in the except clause.
 logger = logging.getLogger(__name__)
+
+# VADER — fast deterministic NLP sentiment (no API call, no rate limit)
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    _vader = SentimentIntensityAnalyzer()
+except ImportError:
+    _vader = None
+    logging.warning("vaderSentiment not installed. Falling back to LLM-only sentiment.")
+
+
+def _score_headlines_with_vader(news_data: Optional["NewsResponse"]) -> dict:
+    """Runs VADER on all article titles — returns aggregate compound score & category."""
+    if not _vader or not news_data or news_data.count == 0:
+        return {"score": 0.0, "label": "NEUTRAL", "headlines_scored": 0}
+    
+    scores = []
+    for article in news_data.articles[:8]:  # Max 8 headlines
+        if article.title:
+            vs = _vader.polarity_scores(article.title)
+            scores.append(vs["compound"])
+    
+    if not scores:
+        return {"score": 0.0, "label": "NEUTRAL", "headlines_scored": 0}
+    
+    avg_score = sum(scores) / len(scores)
+    label = "BULLISH" if avg_score >= 0.05 else "BEARISH" if avg_score <= -0.05 else "NEUTRAL"
+    return {"score": round(avg_score, 3), "label": label, "headlines_scored": len(scores)}
+
+# logger is already defined above (before vader import block)
 
 
 # ── LangGraph State Definition ────────────────────────────────────────────────
@@ -82,14 +114,16 @@ class AnalystAgent:
         self.parser = PydanticOutputParser(pydantic_object=FinancialAnalysisResult)
 
         self.system_prompt = """
-You are an elite, professional financial analyst. 
-Your job is to read raw market data, technical indicators, and recent news headlines, then synthesize this into a structured, highly objective analysis.
+You are the elite final Synthesis Node in a Financial Decision Intelligence System.
+Your job is to read PRE-CALCULATED deterministic data (Moving Averages, RSI momentum, and NLP Sentiment) and synthesize this into a structured, highly professional analysis narrative.
 
 CRITICAL RULES:
-1. No creative language, no metaphors, no financial advice. Stick to facts and data.
-2. If the data is missing (e.g. RSI is null), acknowledge it or skip it. Do not hallucinate values.
-3. You MUST format your response EXACTLY following the schema below.
-4. ONLY return a valid JSON object. Do not include markdown code blocks, pre-text, or post-text. 
+1. DO NOT GUESS TRENDS: You will be provided exact numerical technical momentum scores (Calculated by pandas/NumPy). You must base your technical interpretation on THESE numbers.
+2. READ THE HEADLINES: Evaluate the provided news context and isolate the overarching market sentiment. Be ruthless. Assign a numerical value representation in your mind.
+3. CONSTRUCT A CONFIDENCE SCORE: Based on how strongly the Technical Score aligns with the News Sentiment, assign a Confidence percentage out of 100%. (e.g. If RSI is oversold but SMA is death cross and news is terrible, confidence in a specific bounce might be low).
+4. No creative language, no metaphors, no financial advice. Stick to facts and data.
+5. You MUST format your response EXACTLY following the schema below.
+6. ONLY return a valid JSON object. Do not include markdown code blocks, pre-text, or post-text. 
 
 ## EXPECTED JSON OUTPUT FORMAT
 {format_instructions}
@@ -198,11 +232,12 @@ CRITICAL RULES:
         """Node 3: Hardcoded fallback if the retry loop exhausts."""
         logger.error(f"Node [Fallback]: Max retries exhausted for {state['stock_data'].symbol}.")
         fallback = FinancialAnalysisResult(
-            summary="Analysis failed due to repetitive validation errors from the AI model.",
-            sentiment="NEUTRAL",
-            key_findings=[],
-            risk_factors=["System encountered an unrecoverable validation error during synthesis."],
-            technical_posture="Data unavailable due to parsing failure."
+            verdict="NEUTRAL",
+            confidence=0,
+            reasoning_summary="Analysis could not be completed due to repeated AI model validation errors. Please try again.",
+            technical_signals=[],
+            sentiment_signals=[],
+            risk_assessment="System encountered an unrecoverable validation error during synthesis. Data quality may be insufficient.",
         )
         return {"parsed_result": fallback}
 
@@ -221,7 +256,8 @@ CRITICAL RULES:
     def analyze_stock(
         self, 
         stock_data: StockDataResponse, 
-        news_data: Optional[NewsResponse] = None
+        news_data: Optional[NewsResponse] = None,
+        extracted_context: Optional[str] = None
     ) -> FinancialAnalysisResult:
         """
         Public API backward compatible with the older static script.
@@ -229,24 +265,41 @@ CRITICAL RULES:
         """
         logger.info(f"Initializing LangGraph analysis for {stock_data.symbol}")
 
-        # 1. Format Data Context
-        stock_context = json.dumps(stock_data.model_dump(mode="json"), indent=2)
+        # 1. Pre-calculate Deterministic Intelligence
+        tech_scores = compute_technical_signals(stock_data)
+        
+        # 2. VADER NLP pre-scoring (deterministic, no API call)
+        vader_sentiment = _score_headlines_with_vader(news_data)
+        
+        # 3. Format Data Context for LLM Synthesis
         news_context = "No recent news available."
         
         if news_data and news_data.count > 0:
             news_dump = [a.model_dump(mode="json") for a in news_data.articles]
             news_context = json.dumps(news_dump, indent=2)
 
+        rag_context = ""
+        if extracted_context:
+            rag_context = f"\n### 4. RELEVANT HYBRID CONTEXT\n{extracted_context}\n"
+
         human_prompt = f"""
-## TARGET SYMBOL: {stock_data.symbol}
+## TARGET SYMBOL: {stock_data.symbol} | ALGO PRICE: {stock_data.current_price}
 
-### 1. RAW MARKET DATA & TECHNICALS
-{stock_context}
+### 1. PRE-CALCULATED DETERMINISTIC TECHNICAL SIGNALS
+- OVERALL MOMENTUM SCORE (Python Engine): {tech_scores['score']} / 1.0 (Signal: {tech_scores['momentum_signal']})
+- CURRENT RSI (14-period): {tech_scores['rsi']}
+- 50-Day Moving Average: {tech_scores['sma_50']}
+- 200-Day Moving Average: {tech_scores['sma_200']}
 
-### 2. RECENT NEWS CONTEXT
+### 2. VADER NEWS SENTIMENT (Deterministic NLP — DO NOT RECALCULATE)
+- Compound Score: {vader_sentiment['score']} (range -1.0 to +1.0)
+- Label: {vader_sentiment['label']}
+- Headlines Analyzed: {vader_sentiment['headlines_scored']}
+
+### 3. RAW NEWS HEADLINES (Reference only)
 {news_context}
-
-Synthesize this data immediately.
+{rag_context}
+Synthesize the pre-computed data above and emit the final Decision JSON immediately.
 """
         initial_messages = [
             SystemMessage(content=self.system_prompt.replace(

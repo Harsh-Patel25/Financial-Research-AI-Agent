@@ -16,7 +16,7 @@ Design Philosophy:
 """
 
 import logging
-from app.schemas.analysis import FinancialAnalysisResult
+from ..schemas.analysis import FinancialAnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +58,15 @@ def _build_safe_fallback(reason: str) -> FinancialAnalysisResult:
     safe to return to the client when toxic content is detected.
     """
     return FinancialAnalysisResult(
-        summary=(
+        verdict="NEUTRAL",
+        confidence=0,
+        reasoning_summary=(
             "The AI-generated analysis for this symbol was flagged by the "
-            "content safety filter and could not be displayed. "
-            "Please try again or contact support."
+            "content safety filter and could not be displayed."
         ),
-        sentiment="NEUTRAL",
-        technical_posture="Technical analysis data is currently unavailable.",
-        key_findings=[],
-        risk_factors=[
-            "The analysis output was quarantined due to a content policy violation.",
-            "This does not reflect market conditions. Please consult reliable sources.",
-        ],
+        technical_signals=[],
+        sentiment_signals=[],
+        risk_assessment="Quarantined due to content policy violation."
     )
 
 
@@ -92,18 +89,15 @@ def run_toxicity_check(result: FinancialAnalysisResult) -> FinancialAnalysisResu
         A safe fallback FinancialAnalysisResult if any toxic content is found.
     """
     checks: list[tuple[str, str]] = [
-        ("summary", result.summary),
-        ("technical_posture", result.technical_posture),
+        ("reasoning_summary", result.reasoning_summary),
+        ("risk_assessment", result.risk_assessment),
     ]
 
-    # Add each key_finding's detail to the check list
-    for i, finding in enumerate(result.key_findings):
-        checks.append((f"key_findings[{i}].topic", finding.topic))
-        checks.append((f"key_findings[{i}].detail", finding.detail))
+    for i, finding in enumerate(result.technical_signals):
+        checks.append((f"technical_signals[{i}].interpretation", finding.interpretation))
 
-    # Add each risk factor to the check list
-    for i, risk in enumerate(result.risk_factors):
-        checks.append((f"risk_factors[{i}]", risk))
+    for i, finding in enumerate(result.sentiment_signals):
+        checks.append((f"sentiment_signals[{i}].interpretation", finding.interpretation))
 
     for field_name, text in checks:
         flagged, reason = _contains_toxic_content(text)

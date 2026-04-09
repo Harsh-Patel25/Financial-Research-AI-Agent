@@ -23,7 +23,7 @@ import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-from app.core.config import settings
+from .config import settings
 
 logger = logging.getLogger(__name__)
 

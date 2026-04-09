@@ -109,13 +109,13 @@ def run_hallucination_check(
 
     # Collect all text fields to check
     text_fields: dict[str, str] = {
-        "summary": result.summary,
-        "technical_posture": result.technical_posture,
+        "reasoning_summary": result.reasoning_summary,
+        "risk_assessment": result.risk_assessment
     }
-    for i, finding in enumerate(result.key_findings):
-        text_fields[f"key_findings[{i}].detail"] = finding.detail
-    for i, risk in enumerate(result.risk_factors):
-        text_fields[f"risk_factors[{i}]"] = risk
+    for i, finding in enumerate(result.technical_signals):
+        text_fields[f"technical_signals[{i}].interpretation"] = finding.interpretation
+    for i, finding in enumerate(result.sentiment_signals):
+        text_fields[f"sentiment_signals[{i}].interpretation"] = finding.interpretation
 
     for field_name, text in text_fields.items():
         numbers = _extract_numbers(text)
@@ -146,7 +146,7 @@ def run_hallucination_check(
             "Please refer to the live metrics above for accurate figures.]"
         )
         result = result.model_copy(
-            update={"summary": result.summary + correction_notice}
+            update={"reasoning_summary": result.reasoning_summary + correction_notice}
         )
         logger.warning(
             "Hallucination check flagged %d value(s) in analysis for %s.",

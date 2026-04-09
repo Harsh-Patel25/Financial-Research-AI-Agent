@@ -40,7 +40,7 @@ from fastapi import APIRouter, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
+from ..schemas.analyze import AnalyzeRequest, AnalyzeResponse
 
 # Local limiter instance or pull from request state
 limiter = Limiter(key_func=get_remote_address)

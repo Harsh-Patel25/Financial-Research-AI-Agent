@@ -7,7 +7,7 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
 ## 🟢 PHASE 1 – CORE WORKFLOW & INFRASTRUCTURE
 
 ### 🆕 TASK 0: Infrastructure Setup
-- [x] Initialize Git repository
+- [x] Initialize Git repository   
 - [x] Configure `.gitignore` (Python, VSCode, Environment files)
 - [x] Set up `pytest` framework (Create `tests/` directory)
 - [x] Create basic `Dockerfile`
@@ -117,30 +117,30 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
 ## 🟡 PHASE 2 – RAG & ADVANCED FEATURES
 
 ### TASK 7: Document Ingestion
-- [ ] Implement PDF loader (PyPDF/LangChain)
-- [ ] Implement Text extraction
-- [ ] Apply `RecursiveCharacterTextSplitter`
-- [ ] Configure chunk size and overlap
-- [ ] Store metadata (source, page, date)
+- [x] Implement PDF loader (PyPDF/LangChain)
+- [x] Implement Text extraction
+- [x] Apply `RecursiveCharacterTextSplitter`
+- [x] Configure chunk size and overlap
+- [x] Store metadata (source, page, date)
 
 ### TASK 7.5: Vector DB Persistence
-- [ ] Setup Chroma with persistent storage (disk-based)
-- [ ] Ensure data survives app restart
-- [ ] Implement collection versioning
-- [ ] Add metadata indexing for faster filtering
+- [x] Setup Chroma with persistent storage (disk-based)
+- [x] Ensure data survives app restart
+- [x] Implement collection versioning
+- [x] Add metadata indexing for faster filtering
     > **Deliverable:** ✔ Persistent vector storage layer
 
 ### TASK 8: Embeddings Pipeline
-- [ ] Generate embeddings (OpenAI `text-embedding-3-small` or HuggingFace)
-- [ ] Store embeddings with metadata in Chroma
-- [ ] Implement embedding version control
+- [x] Generate embeddings (OpenAI `text-embedding-3-small` or HuggingFace)
+- [x] Store embeddings with metadata in Chroma
+- [x] Implement embedding version control
 
 ### TASK 9: Semantic Retrieval
-- [ ] Convert user query to embedding
-- [ ] Perform similarity search
-- [ ] Apply score threshold filtering (Exclude irrelevant chunks)
-- [ ] Inject retrieved context into LLM prompt
-- [ ] Add retrieval logging (Inspect what chunks are being retrieved)
+- [x] Convert user query to embedding
+- [x] Perform similarity search
+- [x] Apply score threshold filtering (Exclude irrelevant chunks)
+- [x] Inject retrieved context into LLM prompt
+- [x] Add retrieval logging (Inspect what chunks are being retrieved)
     > **Deliverable:** ✔ Stable RAG pipeline integrated with main workflow
 
 ---
@@ -148,32 +148,60 @@ Use this file to track your progress. Mark tasks as completed by changing `[ ]` 
 ## 🔴 PHASE 3 – PRODUCTION READINESS
 
 ### TASK 10: Evaluation & Observability
-- [ ] Create gold-standard evaluation dataset (Questions + Ideal Answers)
-- [ ] Expand test query dataset
-- [ ] Implement evaluation scoring script (LLM-as-a-Judge)
-- [ ] Integrate LLM tracing:
-    - [ ] LangSmith OR
-    - [ ] Local structured logging
-- [ ] Add performance metrics tracking (Latency, Token Usage, Cost)
+- [x] Create gold-standard evaluation dataset (Questions + Ideal Answers)
+- [x] Expand test query dataset
+- [x] Implement evaluation scoring script (LLM-as-a-Judge)
+- [x] Integrate LLM tracing:
+    - [x] LangSmith OR
+    - [x] Local structured logging
+- [x] Add performance metrics tracking (Latency, Token Usage, Cost)
     > **Deliverable:** ✔ Measurable system quality & observability
 
 ### TASK 11: Caching & Rate Limiting
-- [ ] Integrate Redis caching
-- [ ] Cache strategies:
-    - [ ] Stock responses (TTL: 1-5 mins)
-    - [ ] News responses (TTL: 30-60 mins)
-    - [ ] Embedding lookups (Optional)
-- [ ] Implement API rate limiting (e.g., `slowapi`)
-- [ ] Add per-user rate limits
+- [x] Integrate Redis caching
+- [x] Cache strategies:
+    - [x] Stock responses (TTL: 1-5 mins)
+    - [x] News responses (TTL: 30-60 mins)
+    - [x] Embedding lookups (Optional)
+- [x] Implement API rate limiting (e.g., `slowapi`)
+- [x] Add per-user rate limits
     > **Deliverable:** ✔ Performance-optimized backend
 
 ### ⚠ TASK 12: Deployment & CI/CD
-- [ ] Finalize `Dockerfile` (Multi-stage build)
-- [ ] Finalize `docker-compose.yml` (App + DB + Redis)
-- [ ] Setup GitHub Actions:
-    - [ ] Lint check
-    - [ ] Test execution
-    - [ ] Build validation
-- [ ] Environment-based configuration (Dev/Staging/Prod)
-- [ ] Prepare production-ready `.env.example`
+- [x] Finalize `Dockerfile` (Multi-stage build)
+- [x] Finalize `docker-compose.yml` (App + DB + Redis)
+- [x] Setup GitHub Actions:
+    - [x] Lint check
+    - [x] Test execution
+    - [x] Build validation
+- [x] Environment-based configuration (Dev/Staging/Prod)
+- [x] Prepare production-ready `.env.example`
     > **Deliverable:** ✔ CI-enabled, containerized deployment-ready system
+
+---
+
+## 🟣 PHASE 4 – TRACK B FINALIZATION & POLISH (SENIOR ARCHITECT PLAN)
+
+### 📈 Module 1: Multi-Asset APIs & Resilience
+- [ ] Fetch macroeconomic metrics (Bonds/Inflation) via FRED API (`pandas-datareader`)
+- [ ] Acquire Options/Commodities data via `yfinance` multi-ticker fetches
+- [ ] Hardcode fallback graceful degradation when limits are hit (`pybreaker`)
+- [ ] Support Multi-asset class analysis (equities, fixed income, commodities)
+
+### 🧮 Module 2: Advanced Financial Math
+- [ ] Integrate `PyPortfolioOpt` for Modern Portfolio Theory calculations
+- [ ] Optimize portfolio based on Max Sharpe Ratio / Efficient Frontier
+- [ ] Basic Options pricing logic (Black-Scholes)
+
+### ⚖️ Module 3: Stock Comparison & Market Alerts
+- [ ] Build Comparison Tab: 2 tickers, normalized percentage Plotly lines, AI dual-analysis
+- [ ] Build Background Polling: Task runner (`apscheduler`/`Celery`) for market events
+- [ ] Build UI Notifications: Use `st.toast` to feed background alerts into Streamlit
+
+### 🎨 Module 4: UI Overhaul & Deployment
+- [ ] Layout Architecture: Integrate `streamlit-option-menu` for sidebar tab routing
+- [ ] Advanced Grids: Integrate `streamlit-aggrid` for professional portfolio tracking
+- [ ] PDF Generation: Integrate `fpdf2` or `WeasyPrint` for 1-click Executive Reports
+- [ ] Industry Standard: Ensure FastAPI `/docs` is heavily documented
+- [ ] Deploy Application: Push to robust cloud hosting environment
+- [ ] Deliverable Record: 10 Minute professional demo recording

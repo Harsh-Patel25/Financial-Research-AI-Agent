@@ -8,7 +8,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.services.stock_service import stock_service
+from ..services.stock_service import stock_service
 
 router = APIRouter(prefix="/api/v1/stream", tags=["stream"])
 logger = logging.getLogger(__name__)

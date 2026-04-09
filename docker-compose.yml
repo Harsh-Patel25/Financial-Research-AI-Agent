@@ -1,7 +1,9 @@
 version: '3.8'
 
 services:
-  app:
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  backend:
     build: .
     volumes:
       - .:/app
@@ -11,13 +13,33 @@ services:
       - .env
     working_dir: /app/backend
     environment:
+      - PYTHONPATH=/app/backend
       - DEBUG=True
       - DATABASE_URL=sqlite:///./financial_ai.db
-    # Hot-reload enabled for development
+      - REDIS_URL=redis://redis:6379/0
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
 
+  # ── Streamlit Frontend ─────────────────────────────────────────────────────
+  frontend:
+    build: .
+    volumes:
+      - .:/app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app/backend
+      # Tell Streamlit where the backend lives inside Docker network
+      - BACKEND_URL=http://backend:8000
+    command: python -m streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    depends_on:
+      - backend
+
+  # ── Redis Cache ────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     ports:

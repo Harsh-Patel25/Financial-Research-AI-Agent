@@ -38,21 +38,31 @@ secure, modular, and observable.
 
 import logging
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError 
 from fastapi.responses import JSONResponse
 
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+    HAS_SLOWAPI = True
+except ImportError:
+    HAS_SLOWAPI = False
 
-from app.core.config import settings
-from app.api.analyze import router as analyze_router
-from app.api.portfolio import router as portfolio_router
-from app.api.stream import router as stream_router
-from app.schemas.analyze import HealthResponse
-from app.core.database import validate_db_connection, engine, Base
-import app.models  # noqa: F401 — ensures all models are registered with Base
+from fastapi.middleware.cors import CORSMiddleware
+
+from .core.config import settings
+from .api.analyze import router as analyze_router
+from .api.portfolio import router as portfolio_router
+from .api.stream import router as stream_router
+from .api.rag import router as rag_router
+from .api.assets import router as assets_router
+from .api.alerts import router as alerts_router
+from .schemas.analyze import HealthResponse
+from .core.database import validate_db_connection, engine, Base
+from .core.telemetry import performance_metrics_middleware
+from . import models  # noqa: F401
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -63,18 +73,45 @@ logger = logging.getLogger(__name__)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title=settings.app_name,
-    description="Production-grade Financial Research AI API.",
-    version="0.1.0",
-    docs_url="/docs" if settings.debug else None,  # disable Swagger in prod
-    redoc_url=None,
+    title="FITerminal Core API",
+    description="""
+    Production-grade Financial Research AI API implementing Modern Portfolio Theory,
+    Background Market Alerts, Dual-Asset Comparisons, and Live Websocket streaming.
+    
+    ## Core Microservices:
+    * **RAG**: NLP context analysis against dense document stores.
+    * **Stream**: Live WebSockets matching frontend ticks.
+    * **Portfolio**: Math engine using `PyPortfolioOpt`.
+    * **Assets**: Global Multi-Asset (Bonds, Commodities, Options) fetchers.
+    """,
+    version="2.0.0",
+    docs_url="/docs",  
+    redoc_url="/redoc",
 )
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=["20/minute"])
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+if HAS_SLOWAPI:
+    try:
+        limiter = Limiter(key_func=get_remote_address, default_limits=["20/minute"])
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_middleware(SlowAPIMiddleware)
+        logger.info("🛡️ Rate Limiter enabled")
+    except Exception as e:
+        logger.warning("Rate Limiter initialization failed: %s", e)
+else:
+    logger.warning("🛡️ Rate Limiter disabled (library not found)")
+
+# --- Middleware: CORS ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Production: restrict to frontend domain
+    allow_credentials=False, # Must be False if allow_origins is ["*"]
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.middleware("http")(performance_metrics_middleware)
 
 # ── Middleware: Global Error Handler ──────────────────────────────────────────
 @app.exception_handler(RequestValidationError)
@@ -100,16 +137,20 @@ async def global_exception_handler(
 
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
+from .services.alert_service import start_scheduler, stop_scheduler
+
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("🚀 %s starting up", settings.app_name)
     validate_db_connection()  # Fail fast if DB is unreachable
     Base.metadata.create_all(bind=engine)  # Auto-create all registered tables
+    start_scheduler()
     logger.info("🗃️ Tables created/verified")
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    stop_scheduler()
     logger.info("🛑 %s shutting down", settings.app_name)
 
 
@@ -117,11 +158,25 @@ async def on_shutdown() -> None:
 app.include_router(analyze_router)
 app.include_router(portfolio_router)
 app.include_router(stream_router)
+app.include_router(rag_router)
+app.include_router(assets_router)
+app.include_router(alerts_router)
 
 
+# ── Health Check ──────────────────────────────────────────────────────────────
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 async def health_check() -> HealthResponse:
-    """Liveness probe — returns 200 if the service is up."""
-    return HealthResponse(status="ok", app=settings.app_name)
+    """Liveness probe reporting system status."""
+    is_db_up = True
+    try:
+        validate_db_connection()
+    except Exception:
+        is_db_up = False
+        
+    return HealthResponse(
+        status="ok" if is_db_up else "degraded", 
+        app=settings.app_name,
+        details={"database": "online" if is_db_up else "offline"}
+    )
 
 

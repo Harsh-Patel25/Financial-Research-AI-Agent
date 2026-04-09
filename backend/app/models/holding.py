@@ -38,6 +38,7 @@ class Holding(Base):
     - average_price: The average cost per share across all buy transactions.
     """
     __tablename__ = "holdings"
+    __table_args__ = {"extend_existing": True}
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 

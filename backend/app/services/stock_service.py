@@ -28,8 +28,8 @@ from tenacity import (
     before_sleep_log,
 )
 
-from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError  # noqa: F401
-from app.core.cache import cache
+from ..core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError  # noqa: F401
+from ..core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,23 @@ class StockService:
                 "previous_close": round(float(getattr(info, "previous_close", 0) or 0), 4) if info else 0.0,
                 "day_high": round(float(getattr(info, "day_high", 0) or 0), 4) if info else 0.0,
                 "day_low": round(float(getattr(info, "day_low", 0) or 0), 4) if info else 0.0,
+                "market_cap": getattr(info, "market_cap", None) if info else None,
             }
+            # Trailing PE is usually only in full .info, not .fast_info
+            if not result["market_cap"]:
+                try:
+                    full_info = ticker.info
+                    result["market_cap"] = full_info.get("marketCap")
+                    result["pe_ratio"] = full_info.get("trailingPE")
+                except Exception:
+                    result["pe_ratio"] = None
+            else:
+                # Fast info doesn't have PE, fetch if needed
+                try:
+                    result["pe_ratio"] = ticker.info.get("trailingPE")
+                except Exception:
+                    result["pe_ratio"] = None
+
             logger.info("Price fetched | symbol=%s | price=%s", symbol, result["price"])
             return result
 
@@ -276,7 +292,7 @@ class StockService:
         """
         import pandas as pd
         from datetime import datetime, timezone
-        from app.services.indicators import calculate_all
+        from .indicators import calculate_all
 
         symbol = symbol.upper().strip()
         cache_key = f"stock:{symbol}"
@@ -320,6 +336,8 @@ class StockService:
             "day_high": price_data.get("day_high"),
             "day_low": price_data.get("day_low"),
             "volume": volume,
+            "market_cap": price_data.get("market_cap"),
+            "pe_ratio": price_data.get("pe_ratio"),
             "rsi": indicators["rsi"],
             "sma": indicators["sma"],
             "ema": indicators["ema"],

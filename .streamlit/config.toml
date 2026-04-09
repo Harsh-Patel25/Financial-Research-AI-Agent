@@ -1,0 +1,8 @@
+# Streamlit Cloud Deployment Configuration
+
+[server]
+headless = true
+port = 8501
+
+[browser]
+gatherUsageStats = false
