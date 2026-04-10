@@ -67,7 +67,7 @@ class Holding(Base):
     # (in-session), SQLAlchemy will also delete its Holding objects.
     # This is the ORM-level mirror of the DB-level ondelete="CASCADE".
     portfolio: Mapped["Portfolio"] = relationship(
-        "Portfolio",
+        "app.models.portfolio.Portfolio",
         back_populates="holdings",
     )
 

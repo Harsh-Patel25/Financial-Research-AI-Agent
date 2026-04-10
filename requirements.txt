@@ -23,10 +23,13 @@ fredapi
 
 # Data Processing
 pandas
+pandas-datareader # Economic data querying
 numpy
 requests
+pybreaker       # Circuit breaker pattern for external APIs
 tenacity        # Retry / exponential backoff for external API calls
 feedparser      # RSS feed parsing for News Service
+PyPortfolioOpt  # Modern Portfolio Theory (mpt_service)
 
 # NLP / Sentiment (legacy modules)
 textblob
@@ -40,6 +43,8 @@ langchain-google-genai
 langchain-groq
 langchain-community
 chromadb
+langchain-chroma
+pinecone
 pypdf
 
 # API File Uploads

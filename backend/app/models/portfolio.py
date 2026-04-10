@@ -51,7 +51,7 @@ class Portfolio(Base):
     # `cascade="all, delete-orphan"` → deleting a Portfolio in Python also
     # deletes all its child Holdings from the session.
     holdings: Mapped[List["Holding"]] = relationship(
-        "Holding",
+        "app.models.holding.Holding",
         back_populates="portfolio",
         cascade="all, delete-orphan",
     )
@@ -59,7 +59,7 @@ class Portfolio(Base):
     # One Portfolio → Many Transactions (immutable audit trail)
     # cascade="all, delete-orphan" → deleting a Portfolio removes its transactions
     transactions: Mapped[List["Transaction"]] = relationship(
-        "Transaction",
+        "app.models.transaction.Transaction",
         back_populates="portfolio",
         cascade="all, delete-orphan",
     )

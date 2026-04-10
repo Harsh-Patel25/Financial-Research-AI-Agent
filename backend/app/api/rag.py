@@ -4,19 +4,28 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import logging
 from ..ai.document_loader import DocumentProcessor
 from ..ai.vector_store_chroma import ChromaVectorStore
+from ..ai.vector_store_pinecone import PineconeVectorStoreImpl
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 logger = logging.getLogger("rag")
 
 # Initialize components
 doc_processor = DocumentProcessor()
-# Because we built an abstraction, we could swap ChromaVectorStore for QdrantVectorStore here easily.
+
+# ── Vector Store Factory ─────────────────────────────────────────────────────
+# Prefers Pinecone (shared cloud DB for team collaboration).
+# Falls back to local ChromaDB if PINECONE key is missing (solo dev / offline).
 _vector_store_instance = None
 
 def get_vector_store():
     global _vector_store_instance
     if _vector_store_instance is None:
-        _vector_store_instance = ChromaVectorStore()
+        if os.getenv("Pinecone_Vector_Database"):
+            logger.info("Vector store: using Pinecone (cloud, shared with team)")
+            _vector_store_instance = PineconeVectorStoreImpl()
+        else:
+            logger.warning("PINECONE key not found — falling back to local ChromaDB")
+            _vector_store_instance = ChromaVectorStore()
     return _vector_store_instance
 
 @router.post("/upload")

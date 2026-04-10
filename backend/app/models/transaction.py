@@ -97,7 +97,7 @@ class Transaction(Base):
 
     # ── ORM Relationship ───────────────────────────────────────────────────
     portfolio: Mapped["Portfolio"] = relationship(
-        "Portfolio",
+        "app.models.portfolio.Portfolio",
         back_populates="transactions",
     )
 

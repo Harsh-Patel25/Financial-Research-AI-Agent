@@ -12,10 +12,11 @@ from contextlib import contextmanager
 import os
 import sys
 
-# Ensure the root 'financial_ai' folder is in sys.path so 'backend' can be resolved via absolute import
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Add the financial_ai/ directory to sys.path so 'backend' resolves as a top-level package.
+# All imports in this file use the 'backend.app.xxx' style, so the parent of 'backend' must be on the path.
+financial_ai_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if financial_ai_root not in sys.path:
+    sys.path.insert(0, financial_ai_root)
 
 # --- BOOTSTRAP: Package Discovery ---
 try:
@@ -23,9 +24,11 @@ try:
     from backend.app.services.news_service import news_service
     from backend.app.ai.analyst import analyst_agent
     from backend.app.schemas.stock import StockDataResponse
+    from backend.app.schemas.analysis import FinancialAnalysisResult
     from backend.app.services import portfolio_service
     from backend.app.services.mpt_service import optimize_portfolio
     from backend.app.core.database import SessionLocal
+    from backend.app.services.options_service import get_options_chain, black_scholes_call, black_scholes_put
 except ImportError as e:
     st.error(f"STRUCTURAL ERROR: Could not find backend modules. Ensure you are running from the project root. (Error: {e})")
     st.stop()
@@ -159,7 +162,7 @@ def trigger_scan(new_ticker):
 # ─── HEADER ──────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="terminal-header">
-    <div class="terminal-logo">CRYSTAL<span>ALPHA</span> TERMINAL 6.0</div>
+    <div class="terminal-logo">CRYSTAL<span>ALPHA</span> TERMINAL</div>
     <div style="display:flex; gap:20px; align-items:center;">
         <div class="status-tag">LIVE MARKET STREAMING</div>
         <div style="font-size:0.75rem; color:var(--text-muted)">{datetime.now().strftime('%d %b %Y | %H:%M:%S')}</div>
@@ -170,15 +173,15 @@ st.markdown(f"""
 # ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🔍 ASSET EXPLORER")
-    srch = st.text_input("Enter Symbol (NSE/BSE/US)", value=st.session_state.ticker, label_visibility="collapsed")
-    if st.button("EXECUTE ANALYSIS ⚡", use_container_width=True):
+    srch = st.text_input("Target Ticker Symbol:", value=st.session_state.ticker, help="Enter NSE/BSE/US Ticker e.g., AAPL or RELIANCE.NS")
+    if st.button("EXECUTE ANALYSIS ⚡", type="primary", use_container_width=True):
         trigger_scan(srch)
     
     st.markdown("---")
     st.markdown("### 💼 QUICK TRADE")
     col_q1, col_q2 = st.columns(2)
     qty = col_q1.number_input("QTY", min_value=1, value=10)
-    if col_q2.button("BUY POS", type="primary", use_container_width=True):
+    if col_q2.button("BUY POS", use_container_width=True):
         with get_db_session() as db:
             ports = portfolio_service.get_all_portfolios(db)
             if not ports:
@@ -197,17 +200,43 @@ with st.sidebar:
         st.caption(log)
 
 # ─── DATA LAYER ───
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_full_intel(symbol):
     sd_dict = stock_service.get_full_stock_data(symbol)
     hist_dict = stock_service.get_historical_data(symbol, period="3mo")
     news_dict = news_service.get_news_for_symbol(symbol, limit=10)
     return sd_dict, hist_dict, news_dict
 
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_ai_analysis(symbol, _sd_obj, _n_data_obj):
+    try:
+        return analyst_agent.analyze_stock(_sd_obj, _n_data_obj)
+    except Exception as e:
+        # Fallback to prevent UI hang from LLM timeouts
+        return FinancialAnalysisResult(
+            verdict="NEUTRAL", 
+            confidence=0, 
+            reasoning_summary=f"⚠️ LLM Subsystem Timeout or API Failure: {e}",
+            risk_assessment="Unable to calculate risk due to offline model."
+        )
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_cached_options(symbol):
+    try:
+        return get_options_chain(symbol)
+    except Exception as e:
+        return {"status": "error", "message": f"Options chain unavailable: {e}"}
+
 try:
     with st.spinner("QUANT REASONING IN PROGRESS..."):
         sd_data, h_data, n_data = fetch_full_intel(st.session_state.ticker)
         sd = StockDataResponse(**sd_data)
+        
+        # Hard Validation Guardrail: Prevent cascading UI crashes from empty outputs
+        if getattr(sd, 'current_price', 0) == 0.0:
+            st.error(f"⚠️ TARGET ACQUISITION FAILED: The symbol '{sd.symbol}' is completely invalid, delisted, or lacks trading volume.")
+            st.stop()
+            
         hist = pd.DataFrame(h_data['data'])
 
     # ── TOP METRICS PULSE ──
@@ -248,7 +277,14 @@ try:
     st.markdown("<br>", unsafe_allow_html=True)
     
     # ── TABS ──
-    tabs = st.tabs(["📉 CHARTS & INDICATORS", "🤖 AI RESEARCH AGENT", "💼 PORTFOLIO ANALYTICS", "📰 MARKET INTELLIGENCE"])
+    tabs = st.tabs([
+        "📉 CHARTS & INDICATORS", 
+        "🤖 AI RESEARCH AGENT", 
+        "⚖️ COMPARISON ENGINE",
+        "📈 OPTIONS PRICER",
+        "💼 PORTFOLIO MPT", 
+        "📰 MARKET INTELLIGENCE"
+    ])
 
     # 1. Charts
     with tabs[0]:
@@ -284,25 +320,73 @@ try:
             with st.chat_message("user"): st.markdown(chat_p)
             with st.chat_message("assistant"):
                 with st.status("Agent Orchestrating Pipelines...", expanded=True) as status:
-                    st.write("🔍 Loading Technical Signals...")
+                    st.write("🔍 Extracting deterministic models from memory...")
                     add_log("[AGENT] Node: TechScan")
-                    time.sleep(0.5)
-                    st.write("📰 Reading News Sentiment...")
+                    st.write("📰 Integrating NLP Sentiment metrics...")
                     add_log("[AGENT] Node: Sentiment")
-                    time.sleep(0.5)
-                    st.write("🧠 Synthesizing Final Verdict...")
+                    st.write("🧠 Sourcing LLM Synthesis (Wait)...")
                     add_log("[AGENT] Node: FinalSynthesis")
                     
-                    analysis = analyst_agent.analyze_stock(sd, n_data)
+                    # Cached lookup — instant if ran before, ~10s if new.
+                    analysis = fetch_ai_analysis(sd.symbol, sd, n_data)
                     ans = f"**VERDICT: {analysis.verdict} ({analysis.confidence}%)**\n\n{analysis.reasoning_summary}\n\n**RISK ASSESSMENT:** {analysis.risk_assessment}"
                     status.update(label="Synthesis Complete!", state="complete")
                 
                 st.markdown(ans)
                 st.session_state.chat_history.append({"role": "assistant", "content": ans})
 
-    # 3. Portfolio
+    # 3. Comparison
     with tabs[2]:
-        st.markdown("### 📊 QUANTITATIVE PORTFOLIO MATRIX")
+        st.markdown("### ⚖️ ASSET COMPARISON ENGINE")
+        c_col1, c_col2 = st.columns([1, 1])
+        target_cmp = c_col1.text_input("Symbol to Compare Against:", "MSFT")
+        if c_col2.button("Run Comparison", use_container_width=True):
+            with st.spinner(f"Fetching data for {target_cmp}..."):
+                try:
+                    c_hist = stock_service.get_historical_data(target_cmp, period="3mo")
+                    df_c = pd.DataFrame(c_hist['data'])
+                    if not df_c.empty and not hist.empty:
+                        fig_cmp = go.Figure()
+                        # Normalize to base 100 for percentage comparison
+                        base_main = hist['close'].iloc[0] if len(hist) > 0 else 1
+                        base_target = df_c['close'].iloc[0] if len(df_c) > 0 else 1
+                        
+                        fig_cmp.add_trace(go.Scatter(x=hist['date'], y=(hist['close']/base_main)*100, name=sd.symbol))
+                        fig_cmp.add_trace(go.Scatter(x=df_c['date'], y=(df_c['close']/base_target)*100, name=target_cmp.upper()))
+                        fig_cmp.update_layout(title="Normalized Performance (Base 100)", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(13,19,32,0.5)')
+                        st.plotly_chart(fig_cmp, use_container_width=True)
+                    else:
+                        st.error("Insufficient historical data for comparison.")
+                except Exception as e:
+                    st.error(f"Failed to compare assets: {e}")
+
+    # 4. Options
+    with tabs[3]:
+        st.markdown("### 📈 BLACK-SCHOLES OPTIONS PRICER")
+        if st.button("Fetch Options Chain ⚡"):
+            with st.spinner("Downloading derivatives chain..."):
+                opt_data = fetch_cached_options(sd.symbol)
+                if opt_data.get("status") == "success":
+                    st.success(f"Loaded closest expiration: {opt_data['nearest_expiration']}")
+                    st.write(f"**Implied Market Sentiment:** {opt_data['implied_sentiment'].upper()}")
+                    
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        st.markdown("#### High Volume Calls")
+                        if opt_data['active_calls']:
+                            df_calls = pd.DataFrame(opt_data['active_calls'])[['strike', 'lastPrice', 'volume', 'impliedVolatility']]
+                            st.dataframe(df_calls, use_container_width=True)
+                    with cc2:
+                        st.markdown("#### High Volume Puts")
+                        if opt_data['active_puts']:
+                            df_puts = pd.DataFrame(opt_data['active_puts'])[['strike', 'lastPrice', 'volume', 'impliedVolatility']]
+                            st.dataframe(df_puts, use_container_width=True)
+                else:
+                    st.warning(opt_data.get("message", "Options chain not available for this ticker."))
+
+    # 5. Portfolio
+    with tabs[4]:
+        st.markdown("### 💼 QUANTITATIVE PORTFOLIO MATRIX")
         with get_db_session() as db:
             ports = portfolio_service.get_all_portfolios(db)
             if not ports:
@@ -317,21 +401,27 @@ try:
                     if st.button("RUN MPT OPTIMIZER ⚡", use_container_width=True):
                         tickers = [h['symbol'] for h in summary['holdings']]
                         if len(tickers) < 2:
-                            st.error("Need at least 2 tickers for MPT.")
+                            st.warning("⚠️ Insufficient Data: Modern Portfolio Theory optimal weighting strictly requires at least 2 assets in your portfolio.")
                         else:
                             add_log("[MPT] Solver active")
                             opt = optimize_portfolio(tickers)
-                            st.write(opt)
+                            
+                            if opt.get("status") == "error":
+                                st.error(f"MPT Engine Failure: {opt.get('message')}")
+                            else:
+                                st.success(f"**Max Sharpe Ratio:** {opt.get('sharpe_ratio', 0):.2f}")
+                            st.info(f"**Expected Annual Return:** {opt.get('expected_return', 0)*100:.2f}%")
+                            st.info(f"**Volatility (Risk):** {opt.get('volatility', 0)*100:.2f}%")
+                            st.write("**Optimal Weights:**", opt.get('weights', {}))
                 with t_col2:
-                    # EF Visualization
                     if len(summary['holdings']) > 0:
                         df_h = pd.DataFrame(summary['holdings'])
                         fig_p = go.Figure(data=[go.Pie(labels=df_h['symbol'], values=df_h['total_invested'], hole=.4)])
                         fig_p.update_layout(title="Asset Allocation", paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
                         st.plotly_chart(fig_p, use_container_width=True)
 
-    # 4. News
-    with tabs[3]:
+    # 6. News
+    with tabs[5]:
         st.markdown("### 📡 REAL-TIME INTELLIGENCE FEED")
         articles = n_data.articles if hasattr(n_data, 'articles') else []
         if not articles:
@@ -340,12 +430,12 @@ try:
             title      = art.title if hasattr(art, 'title') else str(art.get('title', ''))
             source     = art.source if hasattr(art, 'source') else str(art.get('source', 'Unknown'))
             pub_at     = art.published_at if hasattr(art, 'published_at') else art.get('published_at', '')
-            summary    = art.summary if hasattr(art, 'summary') else str(art.get('summary', ''))
+            summary_txt    = art.summary if hasattr(art, 'summary') else str(art.get('summary', ''))
             st.markdown(f"""
             <div class="news-card">
                 <div style="font-size:0.9rem; font-weight:700; color:var(--text-primary)">{title}</div>
                 <div style="font-size:0.7rem; color:var(--text-muted); margin: 5px 0;">{source} | {pub_at}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted)">{str(summary)[:150]}...</div>
+                <div style="font-size:0.8rem; color:var(--text-muted)">{str(summary_txt)[:150]}...</div>
             </div>""", unsafe_allow_html=True)
 
 except Exception as e:
