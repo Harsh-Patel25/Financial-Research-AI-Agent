@@ -5,7 +5,7 @@ SQLAlchemy model for persisting user-defined market alerts.
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Enum
 from sqlalchemy.sql import func
 import enum
-from app.core.database import Base
+from ..core.database import Base
 
 
 class AlertCondition(str, enum.Enum):

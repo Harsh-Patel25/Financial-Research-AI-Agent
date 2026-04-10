@@ -12,11 +12,11 @@ from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from app.core.database import Base
+from ..core.database import Base
 
 if TYPE_CHECKING:
-    from app.models.holding import Holding
-    from app.models.transaction import Transaction
+    from .holding import Holding
+    from .transaction import Transaction
 
 
 class Portfolio(Base):
@@ -51,7 +51,7 @@ class Portfolio(Base):
     # `cascade="all, delete-orphan"` → deleting a Portfolio in Python also
     # deletes all its child Holdings from the session.
     holdings: Mapped[List["Holding"]] = relationship(
-        "app.models.holding.Holding",
+        "Holding",
         back_populates="portfolio",
         cascade="all, delete-orphan",
     )
@@ -59,7 +59,7 @@ class Portfolio(Base):
     # One Portfolio → Many Transactions (immutable audit trail)
     # cascade="all, delete-orphan" → deleting a Portfolio removes its transactions
     transactions: Mapped[List["Transaction"]] = relationship(
-        "app.models.transaction.Transaction",
+        "Transaction",
         back_populates="portfolio",
         cascade="all, delete-orphan",
     )

@@ -15,12 +15,12 @@ from sqlalchemy import String, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
 
-from app.core.database import Base
+from ..core.database import Base
 
 # TYPE_CHECKING guard prevents circular imports at runtime.
 # The import is only resolved by mypy / IDEs for type hints.
 if TYPE_CHECKING:
-    from app.models.portfolio import Portfolio
+    from .portfolio import Portfolio
 
 
 class Holding(Base):
@@ -67,7 +67,7 @@ class Holding(Base):
     # (in-session), SQLAlchemy will also delete its Holding objects.
     # This is the ORM-level mirror of the DB-level ondelete="CASCADE".
     portfolio: Mapped["Portfolio"] = relationship(
-        "app.models.portfolio.Portfolio",
+        "Portfolio",
         back_populates="holdings",
     )
 

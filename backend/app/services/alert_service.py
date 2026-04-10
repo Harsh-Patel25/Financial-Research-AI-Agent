@@ -15,9 +15,9 @@ from typing import List, Dict, Any
 
 import yfinance as yf
 
-from app.core.database import SessionLocal
-from app.models.alert import Alert, AlertCondition, AlertStatus
-from app.services.indicators import calculate_rsi, calculate_sma
+from ..core.database import SessionLocal
+from ..models.alert import Alert, AlertCondition, AlertStatus
+from .indicators import calculate_rsi, calculate_sma
 
 logger = logging.getLogger(__name__)
 
